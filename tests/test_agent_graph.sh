@@ -8,6 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/../lib"
 BUILDER="$LIB_DIR/agent_graph_builder.py"
+RESOLVER="$LIB_DIR/context_resolver.py"
 
 TESTS_PASSED=0
 TESTS_FAILED=0
@@ -235,22 +236,71 @@ print(row[0])
   assert_gt "$count" 0 "UT-006: edge_resolver generates USES_SKILL edges"
 }
 
-# UT-007: hybrid_scorer — placeholder for Phase 2
-test_ut007_hybrid_scorer_placeholder() {
-  echo -e "${YELLOW}⏭${NC} UT-007: hybrid_scorer (Phase 2 — skipped)"
-  TESTS_PASSED=$((TESTS_PASSED + 1))
+# UT-007: hybrid_scorer — FTS5 + Graph produces merged scores
+test_ut007_hybrid_scorer() {
+  local repo
+  repo=$(create_test_repo)
+  python3 "$BUILDER" build "$repo" --force 2>/dev/null
+  local output
+  output=$(python3 "$RESOLVER" "定款" --repo "$repo" --json 2>/dev/null)
+  # Should return context_chain with scored entries
+  local chain_len
+  chain_len=$(echo "$output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('context_chain',[])))")
+  assert_gt "$chain_len" 0 "UT-007: hybrid_scorer produces context_chain entries"
 }
 
-# UT-008: context_resolver — placeholder for Phase 2
-test_ut008_context_resolver_placeholder() {
-  echo -e "${YELLOW}⏭${NC} UT-008: context_resolver (Phase 2 — skipped)"
-  TESTS_PASSED=$((TESTS_PASSED + 1))
+# UT-008: context_resolver — returns matched_agents and matched_skills
+test_ut008_context_resolver() {
+  local repo
+  repo=$(create_test_repo)
+  python3 "$BUILDER" build "$repo" --force 2>/dev/null
+  local output
+  output=$(python3 "$RESOLVER" "定款" --repo "$repo" --json 2>/dev/null)
+  assert_contains "$output" '"matched_agents"' "UT-008: context_resolver returns matched_agents"
+  assert_contains "$output" '"matched_skills"' "UT-008: context_resolver returns matched_skills"
+  assert_contains "$output" '"files_to_read"' "UT-008: context_resolver returns files_to_read"
+  assert_contains "$output" '"estimated_tokens"' "UT-008: context_resolver returns estimated_tokens"
 }
 
-# UT-009 / UT-010: depth/budget — placeholder for Phase 2
-test_ut009_010_placeholder() {
-  echo -e "${YELLOW}⏭${NC} UT-009/010: depth/budget (Phase 2 — skipped)"
-  TESTS_PASSED=$((TESTS_PASSED + 1))
+# UT-009: depth control — depth=0 returns fewer nodes than depth=2
+test_ut009_depth_control() {
+  local repo
+  repo=$(create_test_repo)
+  python3 "$BUILDER" build "$repo" --force 2>/dev/null
+
+  local chain_d0 chain_d2
+  chain_d0=$(python3 "$RESOLVER" "定款" --repo "$repo" --depth 0 --json 2>/dev/null \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('context_chain',[])))")
+  chain_d2=$(python3 "$RESOLVER" "定款" --repo "$repo" --depth 2 --json 2>/dev/null \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('context_chain',[])))")
+  # depth=2 should include graph-expanded neighbors
+  if (( chain_d2 >= chain_d0 )); then
+    echo -e "${GREEN}✓${NC} UT-009: depth=2 (${chain_d2}) >= depth=0 (${chain_d0})"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+  else
+    echo -e "${RED}✗${NC} UT-009: depth=2 ($chain_d2) < depth=0 ($chain_d0)"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+  fi
+}
+
+# UT-010: token budget — max-tokens limits output
+test_ut010_token_budget() {
+  local repo
+  repo=$(create_test_repo)
+  python3 "$BUILDER" build "$repo" --force 2>/dev/null
+
+  local tokens_small tokens_large
+  tokens_small=$(python3 "$RESOLVER" "定款" --repo "$repo" --max-tokens 500 --json 2>/dev/null \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('estimated_tokens',0))")
+  tokens_large=$(python3 "$RESOLVER" "定款" --repo "$repo" --max-tokens 50000 --json 2>/dev/null \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('estimated_tokens',0))")
+  if (( tokens_small <= tokens_large )); then
+    echo -e "${GREEN}✓${NC} UT-010: budget=500 tokens(${tokens_small}) <= budget=50000 tokens(${tokens_large})"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+  else
+    echo -e "${RED}✗${NC} UT-010: budget=500 ($tokens_small) > budget=50000 ($tokens_large)"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+  fi
 }
 
 # UT-011: token_estimator
@@ -293,10 +343,17 @@ test_ut013_readable_output() {
   assert_contains "$output" "Skills:" "UT-013: Skills count in output"
 }
 
-# UT-014: fallback — placeholder for Phase 2
-test_ut014_fallback_placeholder() {
-  echo -e "${YELLOW}⏭${NC} UT-014: fallback (Phase 2 — skipped)"
-  TESTS_PASSED=$((TESTS_PASSED + 1))
+# UT-014: fallback — query with no matches returns P0 minimal context
+test_ut014_fallback() {
+  local repo
+  repo=$(create_test_repo)
+  python3 "$BUILDER" build "$repo" --force 2>/dev/null
+  local output
+  # Query something that won't match any FTS5 index
+  output=$(python3 "$RESOLVER" "zzzznonexistentqueryzzzz" --repo "$repo" --json 2>/dev/null)
+  local chain_len
+  chain_len=$(echo "$output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('context_chain',[])))")
+  assert_gt "$chain_len" 0 "UT-014: fallback returns P0 minimal context for no-match query"
 }
 
 # UT-015: validation summary
@@ -380,6 +437,77 @@ print(len(rows))
   assert_gt "$result" 0 "FTS5: search for '定款' returns results"
 }
 
+# --- Phase 2: Context Resolver ---
+
+# CR-001: Direct agent lookup via --agent
+test_cr001_agent_lookup() {
+  local repo
+  repo=$(create_test_repo)
+  python3 "$BUILDER" build "$repo" --force 2>/dev/null
+  local output
+  output=$(python3 "$RESOLVER" --agent conductor --repo "$repo" --json 2>/dev/null)
+  assert_contains "$output" '"conductor"' "CR-001: --agent conductor returns conductor in results"
+}
+
+# CR-002: Direct skill lookup via --skill
+test_cr002_skill_lookup() {
+  local repo
+  repo=$(create_test_repo)
+  python3 "$BUILDER" build "$repo" --force 2>/dev/null
+  local output
+  output=$(python3 "$RESOLVER" --skill teikan-drafter --repo "$repo" --json 2>/dev/null)
+  assert_contains "$output" '"teikan-drafter"' "CR-002: --skill teikan-drafter returns skill"
+}
+
+# CR-003: Markdown output format
+test_cr003_markdown_output() {
+  local repo
+  repo=$(create_test_repo)
+  python3 "$BUILDER" build "$repo" --force 2>/dev/null
+  local output
+  output=$(python3 "$RESOLVER" "定款" --repo "$repo" --format markdown 2>/dev/null)
+  assert_contains "$output" "Agent Context" "CR-003: markdown output has header"
+  assert_contains "$output" "Context Chain" "CR-003: markdown output has Context Chain"
+}
+
+# CR-004: task-type scoring adjustment
+test_cr004_task_type() {
+  local repo
+  repo=$(create_test_repo)
+  python3 "$BUILDER" build "$repo" --force 2>/dev/null
+  local output
+  output=$(python3 "$RESOLVER" "定款" --repo "$repo" --task-type bugfix --json 2>/dev/null)
+  local task_type
+  task_type=$(echo "$output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('metadata',{}).get('task_type',''))")
+  assert_equals "bugfix" "$task_type" "CR-004: task-type=bugfix recorded in metadata"
+}
+
+# CR-005: savings_vs_full percentage
+test_cr005_savings() {
+  local repo
+  repo=$(create_test_repo)
+  python3 "$BUILDER" build "$repo" --force 2>/dev/null
+  local output
+  output=$(python3 "$RESOLVER" "定款" --repo "$repo" --json 2>/dev/null)
+  assert_contains "$output" '"savings_vs_full"' "CR-005: savings_vs_full field present"
+}
+
+# CR-006: error when DB missing
+test_cr006_missing_db() {
+  local repo
+  repo=$(mktemp -d "$TEST_TEMP_DIR/empty-repo-XXXXXX")
+  mkdir -p "$repo/.gitnexus"
+  local exit_code=0
+  python3 "$RESOLVER" "test" --repo "$repo" --json 2>/dev/null || exit_code=$?
+  if (( exit_code != 0 )); then
+    echo -e "${GREEN}✓${NC} CR-006: exits non-zero when DB missing"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+  else
+    echo -e "${RED}✗${NC} CR-006: should exit non-zero when DB missing"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+  fi
+}
+
 # RT-004: CodeRelation not affected (placeholder — needs real repo)
 test_rt004_code_relation_safe() {
   echo -e "${YELLOW}⏭${NC} RT-004: CodeRelation safety (requires real indexed repo — skipped)"
@@ -399,19 +527,26 @@ test_ut003_skill_without_frontmatter
 test_ut004_invalid_frontmatter_skip
 test_ut005_knowledge_parser
 test_ut006_uses_skill_edge
-test_ut007_hybrid_scorer_placeholder
-test_ut008_context_resolver_placeholder
-test_ut009_010_placeholder
+test_ut007_hybrid_scorer
+test_ut008_context_resolver
+test_ut009_depth_control
+test_ut010_token_budget
 test_ut011_token_estimator
 test_ut012_json_output
 test_ut013_readable_output
-test_ut014_fallback_placeholder
+test_ut014_fallback
 test_ut015_validation_summary
 test_dry_run
 test_status_command
 test_list_command
 test_fts5_index
 test_fts5_search
+test_cr001_agent_lookup
+test_cr002_skill_lookup
+test_cr003_markdown_output
+test_cr004_task_type
+test_cr005_savings
+test_cr006_missing_db
 test_rt004_code_relation_safe
 
 echo

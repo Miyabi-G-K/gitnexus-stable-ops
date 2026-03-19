@@ -123,6 +123,7 @@ cmd_reindex() {
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AGENT_GRAPH_PY="$SCRIPT_DIR/../lib/agent_graph_builder.py"
+CONTEXT_RESOLVER_PY="$SCRIPT_DIR/../lib/context_resolver.py"
 
 cmd_agent_index() {
   local repo_path="${1:-$PWD}"
@@ -158,6 +159,56 @@ cmd_agent_list() {
   python3 "$AGENT_GRAPH_PY" list "$repo_path" "$@"
 }
 
+cmd_agent_context() {
+  local repo_path=""
+  local query=""
+  local extra_args=()
+
+  # Parse: first non-flag argument = query, repo-path via --repo or positional
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repo)
+        repo_path="$2"
+        shift 2
+        ;;
+      --agent|--skill|--depth|--max-tokens|--task-type|--format)
+        extra_args+=("$1" "$2")
+        shift 2
+        ;;
+      --json)
+        extra_args+=("--json")
+        shift
+        ;;
+      -*)
+        extra_args+=("$1")
+        shift
+        ;;
+      *)
+        if [[ -z "$query" ]]; then
+          query="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  repo_path="${repo_path:-$PWD}"
+  if [[ ! -d "$repo_path" ]]; then
+    _err "Directory not found: $repo_path"
+    return 1
+  fi
+  repo_path="$(cd "$repo_path" && pwd)"
+
+  local db_path="$repo_path/.gitnexus/agent-graph.db"
+  if [[ ! -f "$db_path" ]]; then
+    _err "Agent Graph not found. Run: gni agent-index $repo_path"
+    return 1
+  fi
+
+  _log "Resolving context for: $query"
+  python3 "$CONTEXT_RESOLVER_PY" "$query" --repo "$repo_path" --db "$db_path" "${extra_args[@]}"
+}
+
 cmd_help() {
   cat <<'EOF'
 gni — GitNexus Improved CLI Wrapper
@@ -174,6 +225,16 @@ Agent Graph (Phase 1):
   gni agent-index [repo-path] [--json]   Build Agent Context Graph
   gni agent-status [repo-path] [--json]  Show Agent Graph statistics
   gni agent-list [repo-path] [--json]    List agents and skills
+
+Agent Graph (Phase 2):
+  gni agent-context "<query>" [--repo path] [--json]
+                                          Resolve query to context chain
+      --agent <name>                      Direct agent lookup
+      --skill <name>                      Direct skill lookup
+      --depth <N>                         Graph traversal depth (default: 2)
+      --max-tokens <N>                    Token budget (default: 5000)
+      --task-type <bugfix|feature|refactor>  Task type scoring
+      --format <json|markdown>            Output format
 EOF
 }
 
@@ -193,6 +254,7 @@ main() {
     agent-index) cmd_agent_index "$@" ;;
     agent-status) cmd_agent_status "$@" ;;
     agent-list) cmd_agent_list "$@" ;;
+    agent-context) cmd_agent_context "$@" ;;
     help|--help|-h) cmd_help ;;
     *) _gitnexus "$cmd" "$@" ;;
   esac
