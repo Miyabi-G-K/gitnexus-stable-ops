@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify dependencies
+        run: |
+          echo "=== Checking required dependencies ==="
+          bash --version | head -1
+          git --version
+          jq --version
+          python3 --version
+          echo "=== All dependencies available ==="
+
+      - name: Run tests
+        run: make test
