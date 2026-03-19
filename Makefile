@@ -29,6 +29,8 @@ test:
 	@echo "Running tests..."
 	@bash tests/test_common.sh
 	@bash tests/test_hooks.sh
+	@bash tests/test_agent_graph.sh
+	@bash tests/test_mcp_integration.sh
 
 clean:
 	@echo "Cleaning temporary files..."

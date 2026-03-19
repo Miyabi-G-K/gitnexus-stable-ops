@@ -124,6 +124,8 @@ cmd_reindex() {
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AGENT_GRAPH_PY="$SCRIPT_DIR/../lib/agent_graph_builder.py"
 CONTEXT_RESOLVER_PY="$SCRIPT_DIR/../lib/context_resolver.py"
+MCP_SERVER_PY="$SCRIPT_DIR/../lib/mcp_server.py"
+AGENT_REINDEX_SH="$SCRIPT_DIR/gitnexus-agent-reindex.sh"
 
 cmd_agent_index() {
   local repo_path="${1:-$PWD}"
@@ -209,6 +211,18 @@ cmd_agent_context() {
   python3 "$CONTEXT_RESOLVER_PY" "$query" --repo "$repo_path" --db "$db_path" "${extra_args[@]}"
 }
 
+## --- Agent Graph Commands (Phase 4/5) ---
+
+cmd_agent_reindex() {
+  bash "$AGENT_REINDEX_SH" "$@"
+}
+
+cmd_agent_mcp() {
+  local repo_path="${GITNEXUS_AGENT_REPO:-$PWD}"
+  _log "Starting MCP server for $repo_path"
+  GITNEXUS_AGENT_REPO="$repo_path" python3 "$MCP_SERVER_PY"
+}
+
 cmd_help() {
   cat <<'EOF'
 gni — GitNexus Improved CLI Wrapper
@@ -235,6 +249,10 @@ Agent Graph (Phase 2):
       --max-tokens <N>                    Token budget (default: 5000)
       --task-type <bugfix|feature|refactor>  Task type scoring
       --format <json|markdown>            Output format
+
+Agent Graph (Phase 4/5):
+  gni agent-reindex [repo-path] [--force]  Rebuild Agent Graph (smart diff)
+  gni agent-mcp                            Start MCP server (stdio)
 EOF
 }
 
@@ -255,6 +273,8 @@ main() {
     agent-status) cmd_agent_status "$@" ;;
     agent-list) cmd_agent_list "$@" ;;
     agent-context) cmd_agent_context "$@" ;;
+    agent-reindex) cmd_agent_reindex "$@" ;;
+    agent-mcp) cmd_agent_mcp "$@" ;;
     help|--help|-h) cmd_help ;;
     *) _gitnexus "$cmd" "$@" ;;
   esac

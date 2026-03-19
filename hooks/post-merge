@@ -17,3 +17,19 @@ fi
 
 REPO_PATH="$(git rev-parse --show-toplevel 2>/dev/null)" \
   nohup "$REINDEX_SCRIPT" >/dev/null 2>&1 &
+
+# --- Agent Graph auto-reindex (Phase 4/5) ---
+if [[ "${GITNEXUS_AGENT_REINDEX:-1}" != "0" ]]; then
+  AGENT_REINDEX="${GITNEXUS_STABLE_OPS:-}/bin/gitnexus-agent-reindex.sh"
+  if [[ ! -x "$AGENT_REINDEX" ]]; then
+    for candidate in \
+      "$HOME/.local/share/gitnexus-stable-ops/bin/gitnexus-agent-reindex.sh" \
+      "$HOME/gitnexus-stable-ops/bin/gitnexus-agent-reindex.sh"; do
+      [[ -x "$candidate" ]] && AGENT_REINDEX="$candidate" && break
+    done
+  fi
+  if [[ -x "$AGENT_REINDEX" ]]; then
+    REPO_PATH="$(git rev-parse --show-toplevel 2>/dev/null)" \
+      nohup "$AGENT_REINDEX" >/dev/null 2>&1 &
+  fi
+fi

@@ -17,3 +17,23 @@ fi
 
 REPO_PATH="$(git rev-parse --show-toplevel 2>/dev/null)" \
   nohup "$REINDEX_SCRIPT" >/dev/null 2>&1 &
+
+# --- Agent Graph auto-reindex (Phase 4/5) ---
+# Triggers agent-graph rebuild if SKILL/, KNOWLEDGE/, or AGENTS.md changed
+if [[ "${GITNEXUS_AGENT_REINDEX:-1}" != "0" ]]; then
+  AGENT_CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -cE '^(SKILL/|KNOWLEDGE/|AGENT/|AGENTS\.md|personal-data/)' || true)
+  if [[ "$AGENT_CHANGED" -gt 0 ]]; then
+    AGENT_REINDEX="${GITNEXUS_STABLE_OPS:-}/bin/gitnexus-agent-reindex.sh"
+    if [[ ! -x "$AGENT_REINDEX" ]]; then
+      for candidate in \
+        "$HOME/.local/share/gitnexus-stable-ops/bin/gitnexus-agent-reindex.sh" \
+        "$HOME/gitnexus-stable-ops/bin/gitnexus-agent-reindex.sh"; do
+        [[ -x "$candidate" ]] && AGENT_REINDEX="$candidate" && break
+      done
+    fi
+    if [[ -x "$AGENT_REINDEX" ]]; then
+      REPO_PATH="$(git rev-parse --show-toplevel 2>/dev/null)" \
+        nohup "$AGENT_REINDEX" --force >/dev/null 2>&1 &
+    fi
+  fi
+fi
