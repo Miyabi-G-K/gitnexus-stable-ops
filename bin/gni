@@ -119,6 +119,45 @@ cmd_reindex() {
   _gitnexus analyze "${analyze_args[@]}" 2>&1
 }
 
+## --- Agent Graph Commands (Phase 1) ---
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+AGENT_GRAPH_PY="$SCRIPT_DIR/../lib/agent_graph_builder.py"
+
+cmd_agent_index() {
+  local repo_path="${1:-$PWD}"
+  shift || true
+  if [[ ! -d "$repo_path" ]]; then
+    _err "Directory not found: $repo_path"
+    return 1
+  fi
+  repo_path="$(cd "$repo_path" && pwd)"
+  _log "Building Agent Graph for $repo_path"
+  python3 "$AGENT_GRAPH_PY" build "$repo_path" --force "$@"
+}
+
+cmd_agent_status() {
+  local repo_path="${1:-$PWD}"
+  shift || true
+  if [[ ! -d "$repo_path" ]]; then
+    _err "Directory not found: $repo_path"
+    return 1
+  fi
+  repo_path="$(cd "$repo_path" && pwd)"
+  python3 "$AGENT_GRAPH_PY" status "$repo_path" "$@"
+}
+
+cmd_agent_list() {
+  local repo_path="${1:-$PWD}"
+  shift || true
+  if [[ ! -d "$repo_path" ]]; then
+    _err "Directory not found: $repo_path"
+    return 1
+  fi
+  repo_path="$(cd "$repo_path" && pwd)"
+  python3 "$AGENT_GRAPH_PY" list "$repo_path" "$@"
+}
+
 cmd_help() {
   cat <<'EOF'
 gni — GitNexus Improved CLI Wrapper
@@ -130,6 +169,11 @@ Usage:
   gni cypher "<query>"
   gni status
   gni reindex
+
+Agent Graph (Phase 1):
+  gni agent-index [repo-path] [--json]   Build Agent Context Graph
+  gni agent-status [repo-path] [--json]  Show Agent Graph statistics
+  gni agent-list [repo-path] [--json]    List agents and skills
 EOF
 }
 
@@ -146,6 +190,9 @@ main() {
     cypher) cmd_cypher "$@" ;;
     status) cmd_status ;;
     reindex) cmd_reindex ;;
+    agent-index) cmd_agent_index "$@" ;;
+    agent-status) cmd_agent_status "$@" ;;
+    agent-list) cmd_agent_list "$@" ;;
     help|--help|-h) cmd_help ;;
     *) _gitnexus "$cmd" "$@" ;;
   esac
