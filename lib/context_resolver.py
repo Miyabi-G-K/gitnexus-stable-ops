@@ -11,6 +11,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -77,12 +78,12 @@ class ContextResult:
 
 # --- Query Preprocessing ---
 
-# Common Japanese particles to strip
-_JA_PARTICLES = set("をはがのでにへとからまでよりもか")
+# Common Japanese single-character particles to strip from queries.
+# Note: multi-char particles like "から", "まで", "より" are handled by bigram splitting.
+_JA_PARTICLES = {"を", "は", "が", "の", "で", "に", "へ", "と", "も", "か"}
 
 def _preprocess_query(query: str) -> str:
     """Preprocess a query for FTS5: split Japanese, remove particles, join with OR."""
-    import re
     raw = query.strip()
     if not raw:
         return ""
@@ -201,8 +202,9 @@ def expand_neighbors(
     depth: int,
     max_depth: int,
     visited: set[str],
+    repo_root: Optional[Path] = None,
 ) -> list[ScoredNode]:
-    """BFS expansion: find neighbors of a node via agent_relations."""
+    """DFS expansion: find neighbors of a node via agent_relations."""
     if depth >= max_depth:
         return []
 
@@ -245,7 +247,7 @@ def expand_neighbors(
         graph_score = edge_weight / (depth + 1)
 
         # Look up node details
-        name, path, token_est = _lookup_node(conn, neighbor_id, neighbor_type)
+        name, path, token_est = _lookup_node(conn, neighbor_id, neighbor_type, repo_root)
 
         neighbors.append(ScoredNode(
             node_id=neighbor_id,
@@ -260,13 +262,18 @@ def expand_neighbors(
         # Recurse
         neighbors.extend(
             expand_neighbors(conn, neighbor_id, neighbor_type,
-                             depth + 1, max_depth, visited)
+                             depth + 1, max_depth, visited, repo_root)
         )
 
     return neighbors
 
 
-def _lookup_node(conn: sqlite3.Connection, node_id: str, node_type: str) -> tuple[str, str, int]:
+def _lookup_node(
+    conn: sqlite3.Connection,
+    node_id: str,
+    node_type: str,
+    repo_root: Optional[Path] = None,
+) -> tuple[str, str, int]:
     """Look up node name, path, and token estimate."""
     if node_type == "Agent":
         row = conn.execute(
@@ -279,7 +286,7 @@ def _lookup_node(conn: sqlite3.Connection, node_id: str, node_type: str) -> tupl
         if row:
             # Estimate tokens from file
             path = row[1]
-            token_est = _estimate_tokens_from_path(path)
+            token_est = _estimate_tokens_from_path(path, repo_root)
             return row[0], path, token_est
     elif node_type == "KnowledgeDoc":
         row = conn.execute(
@@ -302,14 +309,19 @@ def _lookup_node(conn: sqlite3.Connection, node_id: str, node_type: str) -> tupl
     return node_id, "", 0
 
 
-def _estimate_tokens_from_path(rel_path: str) -> int:
-    """Estimate tokens from a relative path (if file exists in CWD)."""
-    p = Path(rel_path)
-    if p.exists():
-        try:
-            return int(p.stat().st_size / BYTES_PER_TOKEN)
-        except OSError:
-            pass
+def _estimate_tokens_from_path(rel_path: str, repo_root: Optional[Path] = None) -> int:
+    """Estimate tokens from a file path, resolving relative to repo_root if given."""
+    candidates = []
+    if repo_root:
+        candidates.append(repo_root / rel_path)
+    candidates.append(Path(rel_path))
+
+    for p in candidates:
+        if p.exists():
+            try:
+                return int(p.stat().st_size / BYTES_PER_TOKEN)
+            except OSError:
+                pass
     return 200  # Default estimate for unknown files
 
 
@@ -402,7 +414,7 @@ def assemble_context(
             (skill_name, skill_name),
         ).fetchone()
         if row:
-            token_est = _estimate_tokens_from_path(row[2]) if row[2] else 200
+            token_est = _estimate_tokens_from_path(row[2], repo_root) if row[2] else 200
             direct_nodes.append(ScoredNode(
                 node_id=row[0], node_type="Skill", name=row[1],
                 score=1.0, depth=0, path=row[2], token_estimate=token_est,
@@ -420,12 +432,13 @@ def assemble_context(
         neighbors = expand_neighbors(
             conn, node.node_id, node.node_type,
             depth=0, max_depth=depth, visited=visited,
+            repo_root=repo_root,
         )
         graph_results.extend(neighbors)
 
         # Ensure entry node has path info
         if not node.path:
-            name, path, token_est = _lookup_node(conn, node.node_id, node.node_type)
+            name, path, token_est = _lookup_node(conn, node.node_id, node.node_type, repo_root)
             node.path = path
             node.token_estimate = token_est
 
@@ -445,7 +458,7 @@ def assemble_context(
 
     # Step 5: Fallback — if nothing found, return P0 minimal context
     if not selected:
-        selected = _fallback_context(conn)
+        selected = _fallback_context(conn, repo_root)
         total_tokens = sum(n.token_estimate or 200 for n in selected)
 
     # Step 6: Build result
@@ -496,7 +509,7 @@ def assemble_context(
     return result
 
 
-def _fallback_context(conn: sqlite3.Connection) -> list[ScoredNode]:
+def _fallback_context(conn: sqlite3.Connection, repo_root: Optional[Path] = None) -> list[ScoredNode]:
     """P0 minimal context: return top agents and most-connected skills."""
     fallback = []
 
@@ -519,7 +532,7 @@ def _fallback_context(conn: sqlite3.Connection) -> list[ScoredNode]:
         """
     ).fetchall()
     for row in rows:
-        token_est = _estimate_tokens_from_path(row[2]) if row[2] else 200
+        token_est = _estimate_tokens_from_path(row[2], repo_root) if row[2] else 200
         fallback.append(ScoredNode(
             node_id=row[0], node_type="Skill", name=row[1],
             score=0.3, depth=1, path=row[2], token_estimate=token_est,

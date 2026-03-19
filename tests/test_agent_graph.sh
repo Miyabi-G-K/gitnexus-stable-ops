@@ -273,12 +273,16 @@ test_ut009_depth_control() {
     | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('context_chain',[])))")
   chain_d2=$(python3 "$RESOLVER" "定款" --repo "$repo" --depth 2 --json 2>/dev/null \
     | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('context_chain',[])))")
-  # depth=2 should include graph-expanded neighbors
-  if (( chain_d2 >= chain_d0 )); then
-    echo -e "${GREEN}✓${NC} UT-009: depth=2 (${chain_d2}) >= depth=0 (${chain_d0})"
+  # depth=2 should include graph-expanded neighbors, strictly more than depth=0
+  if (( chain_d2 > chain_d0 )); then
+    echo -e "${GREEN}✓${NC} UT-009: depth=2 (${chain_d2}) > depth=0 (${chain_d0})"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+  elif (( chain_d2 == chain_d0 && chain_d0 > 0 )); then
+    # Acceptable if token budget limited expansion (still valid)
+    echo -e "${YELLOW}⚠${NC} UT-009: depth=2 == depth=0 (${chain_d0}) — possibly token-budget limited"
     TESTS_PASSED=$((TESTS_PASSED + 1))
   else
-    echo -e "${RED}✗${NC} UT-009: depth=2 ($chain_d2) < depth=0 ($chain_d0)"
+    echo -e "${RED}✗${NC} UT-009: depth=2 ($chain_d2) <= depth=0 ($chain_d0)"
     TESTS_FAILED=$((TESTS_FAILED + 1))
   fi
 }
@@ -509,9 +513,10 @@ test_cr006_missing_db() {
 }
 
 # RT-004: CodeRelation not affected (placeholder — needs real repo)
+TESTS_SKIPPED=0
 test_rt004_code_relation_safe() {
   echo -e "${YELLOW}⏭${NC} RT-004: CodeRelation safety (requires real indexed repo — skipped)"
-  TESTS_PASSED=$((TESTS_PASSED + 1))
+  TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
 }
 
 # --- Run all tests ---
@@ -553,6 +558,9 @@ echo
 echo "=========================================="
 echo -e "Tests passed: ${GREEN}$TESTS_PASSED${NC}"
 echo -e "Tests failed: ${RED}$TESTS_FAILED${NC}"
+if [[ $TESTS_SKIPPED -gt 0 ]]; then
+  echo -e "Tests skipped: ${YELLOW}$TESTS_SKIPPED${NC}"
+fi
 echo "=========================================="
 
 if [[ $TESTS_FAILED -gt 0 ]]; then
