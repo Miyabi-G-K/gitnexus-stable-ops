@@ -40,6 +40,7 @@ This toolkit solves all four.
 | `bin/gitnexus-reindex.sh` | Batch reindex recently changed repos (cron-friendly) |
 | `bin/gitnexus-reindex-all.sh` | Reindex all registered repos with safety defaults |
 | `bin/graph-meta-update.sh` | Generate cross-community edge JSONL for graph visualization |
+| `bin/gitnexus-install-hooks.sh` | Install git hooks for auto-reindex on commit/merge |
 
 ## Requirements
 
@@ -89,6 +90,28 @@ REPO_PATH=~/dev/my-repo bin/gitnexus-auto-reindex.sh
 REPOS_DIR=~/dev bin/gitnexus-reindex.sh
 ```
 
+## Git Hooks
+
+Auto-reindex the GitNexus index whenever you commit or merge:
+
+```bash
+# Install hooks to your repo
+make install-hooks REPO=~/dev/my-repo
+
+# Or directly
+bin/gitnexus-install-hooks.sh ~/dev/my-repo
+```
+
+The hooks run `gitnexus-auto-reindex.sh` in the background — no delay to your workflow.
+
+Disable temporarily:
+
+```bash
+export GITNEXUS_AUTO_REINDEX=0
+```
+
+See [Runbook § Git Hooks](docs/runbook.md#8-git-hooks-auto-reindex-on-commitmerge) for install/disable/uninstall details.
+
 ## Safety Defaults
 
 - **Embedding protection** — Repos with existing embeddings automatically get `--embeddings` flag
@@ -107,6 +130,8 @@ REPOS_DIR=~/dev bin/gitnexus-reindex.sh
 | `REPOS_DIR` | `~/dev` | Root directory for batch reindex |
 | `LOOKBACK_HOURS` | `24` | How far back to check for changes |
 | `OUTPUT_DIR` | `./out` | Graph meta output directory |
+| `GITNEXUS_AUTO_REINDEX` | `1` | Set to `0` to disable git hook auto-reindex |
+| `GITNEXUS_STABLE_OPS` | (auto-detected) | Path to gitnexus-stable-ops root |
 
 ## Use with Cron
 

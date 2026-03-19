@@ -115,3 +115,45 @@ OUTPUT_DIR=./out bin/graph-meta-update.sh
 ### dirty worktree で reindex したい
 
 - 本当に必要なときだけ `ALLOW_DIRTY_REINDEX=1`
+
+## 8. Git Hooks (Auto-Reindex on Commit/Merge)
+
+### Install
+
+```bash
+# Install hooks to a specific repo
+bin/gitnexus-install-hooks.sh /path/to/repo
+
+# Or use make
+make install-hooks REPO=/path/to/repo
+```
+
+既存の `post-commit` / `post-merge` がある場合、自動的に `.bak` バックアップが作成されます。
+
+### Disable
+
+環境変数で無効化できます（hook 自体は残したまま）:
+
+```bash
+export GITNEXUS_AUTO_REINDEX=0
+```
+
+再度有効にするには:
+
+```bash
+unset GITNEXUS_AUTO_REINDEX
+# or
+export GITNEXUS_AUTO_REINDEX=1
+```
+
+### Uninstall
+
+```bash
+# Remove hooks manually
+rm /path/to/repo/.git/hooks/post-commit
+rm /path/to/repo/.git/hooks/post-merge
+
+# Restore original hooks (if backup exists)
+mv /path/to/repo/.git/hooks/post-commit.bak /path/to/repo/.git/hooks/post-commit
+mv /path/to/repo/.git/hooks/post-merge.bak /path/to/repo/.git/hooks/post-merge
+```
