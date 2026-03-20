@@ -57,7 +57,7 @@ needs_rebuild() {
   [[ ! -f "$STAMP_FILE" ]] && return 0
 
   local stamp_time
-  stamp_time=$(stat -f "%m" "$STAMP_FILE" 2>/dev/null || stat -c "%Y" "$STAMP_FILE" 2>/dev/null || echo 0)
+  stamp_time=$(stat -c "%Y" "$STAMP_FILE" 2>/dev/null || stat -f "%m" "$STAMP_FILE" 2>/dev/null || echo 0)
 
   # Check SKILL/, KNOWLEDGE/, AGENTS.md for changes
   local changed=0
@@ -65,7 +65,7 @@ needs_rebuild() {
     if [[ -d "$REPO_PATH/$dir" ]]; then
       while IFS= read -r -d '' f; do
         local ft
-        ft=$(stat -f "%m" "$f" 2>/dev/null || stat -c "%Y" "$f" 2>/dev/null || echo 0)
+        ft=$(stat -c "%Y" "$f" 2>/dev/null || stat -f "%m" "$f" 2>/dev/null || echo 0)
         if [[ "$ft" -gt "$stamp_time" ]]; then
           changed=1
           break
@@ -78,7 +78,7 @@ needs_rebuild() {
   # Also check AGENTS.md at root
   if [[ $changed -eq 0 && -f "$REPO_PATH/AGENTS.md" ]]; then
     local at
-    at=$(stat -f "%m" "$REPO_PATH/AGENTS.md" 2>/dev/null || stat -c "%Y" "$REPO_PATH/AGENTS.md" 2>/dev/null || echo 0)
+    at=$(stat -c "%Y" "$REPO_PATH/AGENTS.md" 2>/dev/null || stat -f "%m" "$REPO_PATH/AGENTS.md" 2>/dev/null || echo 0)
     [[ "$at" -gt "$stamp_time" ]] && changed=1
   fi
 
@@ -86,7 +86,7 @@ needs_rebuild() {
   if [[ $changed -eq 0 && -d "$REPO_PATH/personal-data" ]]; then
     while IFS= read -r -d '' f; do
       local ft
-      ft=$(stat -f "%m" "$f" 2>/dev/null || stat -c "%Y" "$f" 2>/dev/null || echo 0)
+      ft=$(stat -c "%Y" "$f" 2>/dev/null || stat -f "%m" "$f" 2>/dev/null || echo 0)
       if [[ "$ft" -gt "$stamp_time" ]]; then
         changed=1
         break

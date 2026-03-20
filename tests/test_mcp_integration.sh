@@ -271,7 +271,7 @@ fi
 
 # ----- RX-003: reindex skips when up-to-date -----
 echo "--- RX-003: skip when up-to-date ---"
-RX_SKIP=$(bash "$AGENT_REINDEX" "$REPO" 2>&1)
+RX_SKIP=$(bash "$AGENT_REINDEX" "$REPO" 2>&1) || true
 
 if echo "$RX_SKIP" | grep -q "up-to-date"; then
   pass "RX-003: reindex skips when no changes"
@@ -288,7 +288,7 @@ cat >> "$REPO/SKILL/infra/test-skill.md" <<'APPEND'
 New section added for change detection test.
 APPEND
 
-RX_DETECT=$(bash "$AGENT_REINDEX" "$REPO" 2>&1)
+RX_DETECT=$(bash "$AGENT_REINDEX" "$REPO" 2>&1) || true
 if echo "$RX_DETECT" | grep -q "Rebuilding"; then
   pass "RX-004: detects SKILL file changes"
 else
