@@ -556,6 +556,89 @@ def _count_total_tokens(conn: sqlite3.Connection) -> int:
     return knowledge_tokens + skill_tokens
 
 
+# --- Progressive Disclosure Output (Level 1/2/3) ---
+
+def format_progressive(result: ContextResult, level: int = 2) -> str:
+    """Format context result using Progressive Disclosure at the specified level.
+
+    Progressive Disclosure levels:
+      Level 1 (Overview)  — ~100 tokens  — IDs and counts only
+      Level 2 (Standard)  — ~400 tokens  — Names, roles, key attributes (default)
+      Level 3 (Full)      — ~2000 tokens — Complete info + all edges + files
+
+    Designed for LLM system prompt injection:
+      - Use Level 1 for "what exists" broad context awareness
+      - Use Level 2 as default system prompt context
+      - Use Level 3 when the LLM needs to act on a specific node
+    """
+    level = max(1, min(3, level))
+    lines = []
+
+    if level == 1:
+        # --- Level 1: Overview --- IDs and counts only
+        lines.append(f"## Agent Context [Overview] query:{result.query!r}")
+        if result.matched_agents:
+            lines.append(f"agents: [{', '.join(result.matched_agents)}]")
+        if result.matched_skills:
+            truncated = result.matched_skills[:6]
+            suffix = f"  +{len(result.matched_skills)-6} more" if len(result.matched_skills) > 6 else ""
+            lines.append(f"skills: [{', '.join(truncated)}]{suffix}")
+        by_type: dict[str, list[str]] = {}
+        for entry in result.context_chain:
+            t = entry.get("type", "?")
+            by_type.setdefault(t, []).append(entry.get("name", entry.get("node_id", "?")))
+        for t, names in by_type.items():
+            lines.append(f"{t.lower()}: {len(names)} matched")
+        lines.append(f"~{result.estimated_tokens} tokens (savings: {result.savings_vs_full})")
+
+    elif level == 2:
+        # --- Level 2: Standard --- Names, roles, key attributes
+        lines.append(f"## Agent Context [Standard] query:{result.query!r}")
+        lines.append("")
+        if result.matched_agents:
+            lines.append("### Agents")
+            for agent_id in result.matched_agents:
+                # Find agent entry in context chain
+                entry = next(
+                    (e for e in result.context_chain
+                     if e.get("node_id") == agent_id or e.get("name") == agent_id),
+                    None,
+                )
+                if entry:
+                    desc = entry.get("description", "")
+                    desc_str = f" — {desc[:60]}" if desc else ""
+                    lines.append(f"- **{agent_id}**{desc_str}")
+                else:
+                    lines.append(f"- **{agent_id}**")
+        if result.matched_skills:
+            lines.append("")
+            lines.append("### Skills")
+            for skill_id in result.matched_skills[:8]:
+                entry = next(
+                    (e for e in result.context_chain
+                     if e.get("node_id") == skill_id or e.get("name") == skill_id),
+                    None,
+                )
+                if entry:
+                    desc = entry.get("description", "")
+                    desc_str = f" — {desc[:60]}" if desc else ""
+                    lines.append(f"- **{skill_id}**{desc_str}")
+                else:
+                    lines.append(f"- **{skill_id}**")
+            if len(result.matched_skills) > 8:
+                lines.append(f"  *(+{len(result.matched_skills)-8} more — use level=3 for full list)*")
+        lines.append("")
+        lines.append(f"~{result.estimated_tokens} tokens | savings: {result.savings_vs_full}")
+
+    else:
+        # --- Level 3: Full --- Complete info + all edges + files (delegates to format_markdown)
+        lines.append(format_markdown(result))
+        lines.append("")
+        lines.append("*(Progressive Disclosure Level 3 — full detail)*")
+
+    return "\n".join(lines)
+
+
 # --- Markdown Output ---
 
 def format_markdown(result: ContextResult) -> str:
@@ -617,10 +700,13 @@ def main():
                         choices=["bugfix", "feature", "refactor"],
                         help="Task type for scoring adjustment")
     parser.add_argument("--format", type=str, default="json",
-                        choices=["json", "markdown"],
+                        choices=["json", "markdown", "progressive"],
                         help="Output format (default: json)")
     parser.add_argument("--json", action="store_true",
                         help="Shorthand for --format json")
+    parser.add_argument("--level", type=int, default=2,
+                        choices=[1, 2, 3],
+                        help="Progressive Disclosure level: 1=Overview, 2=Standard, 3=Full (default: 2)")
 
     args = parser.parse_args()
 
@@ -662,7 +748,9 @@ def main():
         conn.close()
 
     output_format = "json" if args.json else args.format
-    if output_format == "markdown":
+    if output_format == "progressive":
+        print(format_progressive(result, level=args.level))
+    elif output_format == "markdown":
         print(format_markdown(result))
     else:
         # Convert dataclass to dict
@@ -677,6 +765,8 @@ def main():
             "savings_vs_full": result.savings_vs_full,
             "metadata": result.metadata,
         }
+        if args.level != 2:
+            out["disclosure_level"] = args.level
         print(json.dumps(out, indent=2, ensure_ascii=False))
 
 

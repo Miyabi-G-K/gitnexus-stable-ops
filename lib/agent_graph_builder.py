@@ -81,6 +81,33 @@ class ExternalServiceNode:
     auth_type: str = ""
 
 @dataclass
+class ComputeNodeNode:
+    """Physical/virtual compute node from workspace.json nodes[]."""
+    node_id: str
+    name: str
+    role: str          # gateway / primary / worker
+    os: str            # macos / windows / linux
+    description: str = ""
+    access_type: str = ""   # local / ssh / http
+    ssh_host: str = ""
+    ssh_user: str = ""
+    ip_address: str = ""
+    vpn: str = ""           # tailscale / wireguard
+    workspace_root: str = ""
+    labels: dict = field(default_factory=dict)
+
+@dataclass
+class WorkspaceServiceNode:
+    """Service/agent deployed on a compute node (workspace.json services[])."""
+    service_id: str
+    name: str
+    service_type: str   # agent / server / database / worker
+    node_id: str = ""
+    description: str = ""
+    model: str = ""     # LLM model if agent type
+    labels: dict = field(default_factory=dict)
+
+@dataclass
 class AgentRelation:
     source_id: str
     source_type: str
@@ -682,6 +709,31 @@ CREATE TABLE IF NOT EXISTS external_services (
     auth_type TEXT DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS compute_nodes (
+    node_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'worker',
+    os TEXT NOT NULL DEFAULT '',
+    description TEXT DEFAULT '',
+    access_type TEXT DEFAULT '',
+    ssh_host TEXT DEFAULT '',
+    ssh_user TEXT DEFAULT '',
+    ip_address TEXT DEFAULT '',
+    vpn TEXT DEFAULT '',
+    workspace_root TEXT DEFAULT '',
+    labels TEXT DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS workspace_services (
+    service_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    service_type TEXT NOT NULL DEFAULT 'agent',
+    node_id TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    model TEXT DEFAULT '',
+    labels TEXT DEFAULT '{}'
+);
+
 -- Edge table (AgentRelation — completely separate from CodeRelation)
 CREATE TABLE IF NOT EXISTS agent_relations (
     relation_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -727,8 +779,8 @@ def init_db(db_path: Path) -> sqlite3.Connection:
 
 def clear_agent_graph(conn: sqlite3.Connection):
     """Clear all Agent Graph data (for full rebuild)."""
-    for table in ("agent_fts", "agent_relations", "external_services",
-                   "data_sources", "knowledge_docs", "skills", "agents"):
+    for table in ("agent_fts", "agent_relations", "workspace_services", "compute_nodes",
+                   "external_services", "data_sources", "knowledge_docs", "skills", "agents"):
         conn.execute(f"DELETE FROM {table}")
     conn.commit()
 
@@ -740,6 +792,8 @@ def insert_nodes(
     knowledge: list[KnowledgeDocNode],
     data_sources: list[DataSourceNode],
     services: list[ExternalServiceNode],
+    compute_nodes: list[ComputeNodeNode] | None = None,
+    ws_services: list[WorkspaceServiceNode] | None = None,
 ):
     """Insert all nodes into the database."""
     ts = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -799,6 +853,35 @@ def insert_nodes(
             (svc.svc_id, svc.name, svc.api_url, svc.auth_type),
         )
 
+    # Compute Nodes (infra from workspace.json)
+    for cn in (compute_nodes or []):
+        conn.execute(
+            "INSERT OR REPLACE INTO compute_nodes VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (cn.node_id, cn.name, cn.role, cn.os, cn.description,
+             cn.access_type, cn.ssh_host, cn.ssh_user, cn.ip_address,
+             cn.vpn, cn.workspace_root, json.dumps(cn.labels, ensure_ascii=False)),
+        )
+        conn.execute(
+            "INSERT INTO agent_fts VALUES (?,?,?,?,?)",
+            (cn.node_id, "ComputeNode", cn.name,
+             f"{cn.ip_address} {cn.ssh_host} {cn.os}",
+             cn.description),
+        )
+
+    # Workspace Services (agent deployments from workspace.json)
+    for ws in (ws_services or []):
+        conn.execute(
+            "INSERT OR REPLACE INTO workspace_services VALUES (?,?,?,?,?,?,?)",
+            (ws.service_id, ws.name, ws.service_type, ws.node_id, ws.description,
+             ws.model, json.dumps(ws.labels, ensure_ascii=False)),
+        )
+        conn.execute(
+            "INSERT INTO agent_fts VALUES (?,?,?,?,?)",
+            (f"ws_{ws.service_id}", "WorkspaceService", ws.name,
+             f"{ws.model} {ws.service_type}",
+             ws.description),
+        )
+
     conn.commit()
 
 
@@ -818,6 +901,222 @@ def insert_edges(conn: sqlite3.Connection, edges: list[AgentRelation]):
 
 # --- Main Builder ---
 
+def _resolve_memory_mentions(
+    memory_docs: list[KnowledgeDocNode],
+    agents: list[AgentNode],
+    skills: list[SkillNode],
+    repo_root: Path,
+) -> list[AgentRelation]:
+    """Extract MENTIONS edges from memory file content → agents/skills."""
+    edges: list[AgentRelation] = []
+    if not memory_docs:
+        return edges
+
+    agent_ids = {a.agent_id for a in agents}
+    skill_ids = {s.skill_id for s in skills}
+
+    for doc in memory_docs:
+        try:
+            content = (repo_root / doc.path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+
+        for aid in agent_ids:
+            count = content.count(aid)
+            if count > 0:
+                edges.append(AgentRelation(
+                    source_id=doc.doc_id,
+                    source_type="KnowledgeDoc",
+                    target_id=aid,
+                    target_type="Agent",
+                    relation_type="MENTIONS",
+                    weight=min(1.0, count / 5.0),
+                ))
+
+        for sid in skill_ids:
+            count = content.count(sid)
+            if count > 0:
+                edges.append(AgentRelation(
+                    source_id=doc.doc_id,
+                    source_type="KnowledgeDoc",
+                    target_id=sid,
+                    target_type="Skill",
+                    relation_type="MENTIONS",
+                    weight=min(1.0, count / 3.0),
+                ))
+
+    return edges
+
+
+def _resolve_infra_edges(
+    agents: list[AgentNode],
+    ws_services: list[WorkspaceServiceNode],
+    compute_nodes: list[ComputeNodeNode],
+) -> list[AgentRelation]:
+    """Build DEPLOYED_ON / RUNS_ON edges:
+       Agent → WorkspaceService (DEPLOYED_ON)
+       WorkspaceService → ComputeNode (RUNS_ON)
+    """
+    edges: list[AgentRelation] = []
+
+    # WorkspaceService → ComputeNode (RUNS_ON)
+    node_ids = {n.node_id for n in compute_nodes}
+    for svc in ws_services:
+        if svc.node_id in node_ids:
+            edges.append(AgentRelation(
+                source_id=svc.service_id,
+                source_type="WorkspaceService",
+                target_id=svc.node_id,
+                target_type="ComputeNode",
+                relation_type="RUNS_ON",
+            ))
+
+    # Agent → WorkspaceService (DEPLOYED_ON) — match by agent_id == service_id
+    service_ids = {s.service_id for s in ws_services}
+    for agent in agents:
+        if agent.agent_id in service_ids:
+            edges.append(AgentRelation(
+                source_id=agent.agent_id,
+                source_type="Agent",
+                target_id=agent.agent_id,
+                target_type="WorkspaceService",
+                relation_type="DEPLOYED_ON",
+            ))
+        # Also match by node_binding field
+        if agent.node_binding:
+            for svc in ws_services:
+                if svc.node_id == agent.node_binding:
+                    edges.append(AgentRelation(
+                        source_id=agent.agent_id,
+                        source_type="Agent",
+                        target_id=svc.node_id,
+                        target_type="ComputeNode",
+                        relation_type="RUNS_ON",
+                    ))
+                    break
+
+    return edges
+
+
+def _load_knowledge_refs(repo_root: Path) -> dict:
+    """Read knowledge_refs from .gitnexus/workspace.json (returns {} if absent)."""
+    ws_json = repo_root / ".gitnexus" / "workspace.json"
+    if not ws_json.exists():
+        return {}
+    try:
+        return json.loads(ws_json.read_text()).get("knowledge_refs", {})
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def parse_memory(memory_dir: Path, repo_root: Path) -> list[KnowledgeDocNode]:
+    """Parse MEMORY/**/*.md as agent-memory knowledge docs."""
+    docs = []
+    if not memory_dir.exists():
+        logger.debug("MEMORY directory not found: %s", memory_dir)
+        return docs
+
+    for md_file in sorted(memory_dir.rglob("*.md")):
+        if md_file.name in ("README.md", "INDEX.md"):
+            continue
+
+        rel_path = str(md_file.relative_to(repo_root))
+        parent = md_file.parent.name
+
+        # Determine category
+        name = md_file.name
+        if name == "MEMORY.md":
+            category = "long-term-memory"
+        elif re.match(r"\d{4}-\d{2}-\d{2}", name):
+            category = "daily-log"
+        elif parent in ("learning", "boards", "episodes", "meetings",
+                        "reports", "xai-reports", "archive"):
+            category = f"memory-{parent}"
+        else:
+            category = "agent-memory"
+
+        try:
+            mtime = md_file.stat().st_mtime
+            last_modified = time.strftime("%Y-%m-%d", time.localtime(mtime))
+        except OSError:
+            last_modified = ""
+
+        token_est = estimate_tokens(md_file)
+
+        title = md_file.stem
+        try:
+            first_lines = md_file.read_text(encoding="utf-8", errors="replace").split("\n")[:5]
+            for line in first_lines:
+                if line.startswith("# "):
+                    title = line[2:].strip()
+                    break
+        except OSError:
+            pass
+
+        docs.append(KnowledgeDocNode(
+            doc_id=f"mem_{md_file.stem}",
+            title=title,
+            path=rel_path,
+            category=category,
+            type="memory-md",
+            token_estimate=token_est,
+            last_modified=last_modified,
+        ))
+
+    return docs
+
+
+def _parse_workspace_infra(repo_root: Path) -> tuple[
+    list[ComputeNodeNode], list[WorkspaceServiceNode]
+]:
+    """Parse workspace.json nodes[] and services[] into graph nodes."""
+    ws_json = repo_root / ".gitnexus" / "workspace.json"
+    if not ws_json.exists():
+        return [], []
+
+    try:
+        data = json.loads(ws_json.read_text())
+    except (json.JSONDecodeError, OSError):
+        return [], []
+
+    compute_nodes: list[ComputeNodeNode] = []
+    for n in data.get("nodes", []):
+        access = n.get("access", {})
+        network = n.get("network", {})
+        net_labels = network.get("labels", {})
+        compute_nodes.append(ComputeNodeNode(
+            node_id=n.get("id", ""),
+            name=n.get("name", n.get("id", "")),
+            role=n.get("role", "worker"),
+            os=n.get("os", ""),
+            description=n.get("description", ""),
+            access_type=access.get("type", ""),
+            ssh_host=access.get("host", ""),
+            ssh_user=access.get("user", ""),
+            ip_address=network.get("ip", ""),
+            vpn=net_labels.get("vpn", ""),
+            workspace_root=n.get("workspace_root", ""),
+            labels=n.get("labels", {}),
+        ))
+
+    ws_services: list[WorkspaceServiceNode] = []
+    for s in data.get("services", []):
+        labels = s.get("labels", {})
+        ws_services.append(WorkspaceServiceNode(
+            service_id=s.get("id", ""),
+            name=s.get("name", s.get("id", "")),
+            service_type=s.get("type", "agent"),
+            node_id=s.get("node", ""),
+            description=s.get("description", ""),
+            model=labels.get("model", ""),
+            labels=labels,
+        ))
+
+    logger.info("  -> %d compute nodes, %d workspace services (from workspace.json)",
+                len(compute_nodes), len(ws_services))
+    return compute_nodes, ws_services
+
+
 def build_agent_graph(
     repo_root: Path,
     db_path: Path,
@@ -830,17 +1129,22 @@ def build_agent_graph(
     """
     start_time = time.time()
 
-    # Locate source directories
-    agents_file = repo_root / "KNOWLEDGE" / "AGENTS_CLAUDE.md"
+    # Load workspace.json knowledge_refs for dynamic directory resolution
+    knowledge_refs = _load_knowledge_refs(repo_root)
+    if knowledge_refs:
+        logger.info("Loaded knowledge_refs from workspace.json: %s", knowledge_refs)
+
+    # Locate source directories (dynamic via knowledge_refs, fallback to defaults)
+    skill_dir    = repo_root / knowledge_refs.get("skills_dir",   "SKILL")
+    knowledge_dir = repo_root / knowledge_refs.get("knowledge_dir", "KNOWLEDGE")
+    memory_dir   = repo_root / knowledge_refs.get("memory_dir",   "MEMORY")
+    data_dir     = repo_root / "personal-data"
+
+    agents_file = knowledge_dir / "AGENTS_CLAUDE.md"
     if not agents_file.exists():
-        # Fallback: try parent workspace CLAUDE.md
         alt = repo_root.parent / ".claude" / "CLAUDE.md"
         if alt.exists():
             agents_file = alt
-
-    skill_dir = repo_root / "SKILL"
-    knowledge_dir = repo_root / "KNOWLEDGE"
-    data_dir = repo_root / "personal-data"
 
     # Parse all sources
     logger.info("Parsing agents from %s", agents_file)
@@ -855,6 +1159,12 @@ def build_agent_graph(
     knowledge = parse_knowledge(knowledge_dir, repo_root)
     logger.info("  -> %d knowledge docs", len(knowledge))
 
+    logger.info("Parsing memory from %s", memory_dir)
+    memory_docs = parse_memory(memory_dir, repo_root)
+    logger.info("  -> %d memory docs", len(memory_docs))
+
+    all_knowledge = knowledge + memory_docs
+
     logger.info("Parsing data sources from %s", data_dir)
     data_sources = parse_data_sources(data_dir, repo_root)
     logger.info("  -> %d data sources", len(data_sources))
@@ -862,19 +1172,36 @@ def build_agent_graph(
     services = KNOWN_SERVICES.copy()
     logger.info("  -> %d external services (known)", len(services))
 
+    # Parse compute nodes + workspace services from workspace.json
+    logger.info("Parsing compute nodes from workspace.json...")
+    compute_nodes, ws_services = _parse_workspace_infra(repo_root)
+
     # Resolve edges
     logger.info("Resolving edges...")
-    edges = resolve_edges(agents, skills, knowledge, data_sources, services)
-    logger.info("  -> %d edges", len(edges))
+    edges = resolve_edges(agents, skills, all_knowledge, data_sources, services)
+
+    # Add MENTIONS edges from memory → agents/skills
+    memory_mentions = _resolve_memory_mentions(memory_docs, agents, skills, repo_root)
+    edges.extend(memory_mentions)
+    logger.info("  -> %d edges (incl. %d MENTIONS from memory)", len(edges), len(memory_mentions))
+
+    # Add DEPLOYED_ON / RUNS_ON edges from infra
+    infra_edges = _resolve_infra_edges(agents, ws_services, compute_nodes)
+    edges.extend(infra_edges)
+    logger.info("  -> +%d infra edges (DEPLOYED_ON/RUNS_ON)", len(infra_edges))
 
     # Statistics
-    total_nodes = len(agents) + len(skills) + len(knowledge) + len(data_sources) + len(services)
+    total_nodes = (len(agents) + len(skills) + len(all_knowledge) + len(data_sources)
+                   + len(services) + len(compute_nodes) + len(ws_services))
     stats = {
         "agents": len(agents),
         "skills": len(skills),
         "knowledge_docs": len(knowledge),
+        "memory_docs": len(memory_docs),
         "data_sources": len(data_sources),
         "external_services": len(services),
+        "compute_nodes": len(compute_nodes),
+        "workspace_services": len(ws_services),
         "total_nodes": total_nodes,
         "edges": len(edges),
         "edge_types": {},
@@ -901,7 +1228,8 @@ def build_agent_graph(
         clear_agent_graph(conn)
 
     try:
-        insert_nodes(conn, agents, skills, knowledge, data_sources, services)
+        insert_nodes(conn, agents, skills, all_knowledge, data_sources, services,
+                     compute_nodes, ws_services)
         insert_edges(conn, edges)
     finally:
         conn.close()
@@ -921,15 +1249,21 @@ def get_agent_graph_stats(db_path: Path) -> dict:
     for table, label in [("agents", "agents"), ("skills", "skills"),
                           ("knowledge_docs", "knowledge_docs"),
                           ("data_sources", "data_sources"),
-                          ("external_services", "external_services")]:
-        row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
-        stats[label] = row[0] if row else 0
+                          ("external_services", "external_services"),
+                          ("compute_nodes", "compute_nodes"),
+                          ("workspace_services", "workspace_services")]:
+        try:
+            row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+            stats[label] = row[0] if row else 0
+        except sqlite3.OperationalError:
+            stats[label] = 0  # table may not exist in older DBs
 
     row = conn.execute("SELECT COUNT(*) FROM agent_relations").fetchone()
     stats["edges"] = row[0] if row else 0
     stats["total_nodes"] = sum(stats[k] for k in
                                 ("agents", "skills", "knowledge_docs",
-                                 "data_sources", "external_services"))
+                                 "data_sources", "external_services",
+                                 "compute_nodes", "workspace_services"))
 
     # Edge type breakdown
     rows = conn.execute(
@@ -1032,8 +1366,11 @@ def main():
             print(f"  Agents:           {stats['agents']}")
             print(f"  Skills:           {stats['skills']}")
             print(f"  Knowledge Docs:   {stats['knowledge_docs']}")
+            print(f"  Memory Docs:      {stats.get('memory_docs', 0)}")
             print(f"  Data Sources:     {stats['data_sources']}")
             print(f"  External Services:{stats['external_services']}")
+            print(f"  Compute Nodes:    {stats.get('compute_nodes', 0)}")
+            print(f"  WS Services:      {stats.get('workspace_services', 0)}")
             print(f"  Total Nodes:      {stats['total_nodes']}")
             print(f"  Edges:            {stats['edges']}")
             if stats.get("edge_types"):
@@ -1056,8 +1393,11 @@ def main():
             print(f"  Agents:           {stats.get('agents', 0)}")
             print(f"  Skills:           {stats.get('skills', 0)}")
             print(f"  Knowledge Docs:   {stats.get('knowledge_docs', 0)}")
+            print(f"  Memory Docs:      {stats.get('memory_docs', 0)}")
             print(f"  Data Sources:     {stats.get('data_sources', 0)}")
             print(f"  External Services:{stats.get('external_services', 0)}")
+            print(f"  Compute Nodes:    {stats.get('compute_nodes', 0)}")
+            print(f"  WS Services:      {stats.get('workspace_services', 0)}")
             print(f"  Total Nodes:      {stats.get('total_nodes', 0)}")
             print(f"  Edges:            {stats.get('edges', 0)}")
             if stats.get("edge_types"):
