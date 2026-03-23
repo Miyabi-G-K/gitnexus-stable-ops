@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-03-23
+
+### Added
+- **Agent Context Graph** (`gni agent-index` / `gni ai`): SQLite-based knowledge graph indexing agents, skills, knowledge docs, memory docs, compute nodes, and workspace services from `workspace.json`
+- **Progressive Disclosure** (`gni agent-query` / `gni aq`): Query agent context at three token budget levels — Level 1 (~100 tokens), Level 2 (~400 tokens, default), Level 3 (~2000 tokens)
+- **`gni context-gen` / `gni cg`**: One command auto-generates `CLAUDE.md` section, `AGENTS.md` (full manifest for Codex/AI agents), and `SKILL/_index_generated.md` quick reference
+- **`gni agent-status` / `gni as`**: Display graph statistics (agent/skill/node/edge counts, build time)
+- **FTS5 full-text search** with BM25 ranking and CJK bigram support for Japanese/Chinese/Korean queries
+- `lib/context_gen.py`: Python script generating context files with safe `<!-- gitnexus:agent-context:start/end -->` marker-based injection
+- `lib/agent_graph_builder.py` updates: Memory Docs count fix, FTS5 deduplication, incremental build edge-dedup fix
+- `lib/context_resolver.py` updates: Level 2 agent name lookup fix, `is_fallback` indicator
+- `docs/agent-context-graph_en.md`: English comprehensive guide (setup, commands, LLM injection, FAQ, workspace.json schema)
+- `docs/agent-context-graph.md`: Japanese comprehensive guide (5-minute quickstart, integration with Claude Code/Codex/OpenClaw)
+- `gni` help command overhaul — 4 sections with quick-start and alias reference
+- Workspace manifest (`workspace.json`) schema v1.1 with full documentation
+
+### Changed
+- `gni` CLI bumped to v1.6.0 (internal script versioning)
+- README: Agent Context Graph promoted to headline feature with v1.3.0 callout
+- README: Documentation section restructured with Agent Context Graph sub-section
+- Roadmap: v1.3 completed items listed, v1.4/v1.5 targets added
+
 ## [1.2.0] - 2026-03-19
 
 ### Added

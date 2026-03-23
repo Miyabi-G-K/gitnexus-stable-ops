@@ -1,6 +1,8 @@
 # Agent Context Graph
 
-**gitnexus-stable-ops v1.6.0** で追加された機能。コードシンボルグラフ（GitNexusのコアグラフ）とは独立した、エージェント/スキル/ノード/サービスの知識グラフ。
+> **Language**: [English](./agent-context-graph_en.md) | [日本語](./agent-context-graph.md)
+
+**gitnexus-stable-ops v1.3.0** で追加された機能。コードシンボルグラフ（GitNexusのコアグラフ）とは独立した、エージェント/スキル/ノード/サービスの知識グラフ。
 
 ## 概要
 
