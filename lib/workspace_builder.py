@@ -4,7 +4,8 @@ Workspace Builder — Phase 1 Workspace Graph
 Reads .gitnexus/workspace.json and orchestrates cross-repo,
 cross-symlink analysis for agent-aware workspaces.
 
-Resolves Issue #24: workspace-aware analysis for symlinks and sub-repos.
+Schema v1.1: generalized nodes/services model (tool-agnostic).
+Backwards compatible with v1.0 machines/agents schema.
 """
 
 from __future__ import annotations
@@ -22,8 +23,53 @@ logger = logging.getLogger("workspace-builder")
 
 
 # ---------------------------------------------------------------------------
-# Data classes
+# Data classes — v1.1 generalized schema
 # ---------------------------------------------------------------------------
+
+@dataclass
+class WorkspaceNodeAccess:
+    """Tool-agnostic connection descriptor for a compute node."""
+    type: str                       # "local" | "ssh" | "http" | "custom"
+    host: Optional[str] = None      # SSH hostname / HTTP hostname
+    port: Optional[int] = None      # Port (optional)
+    user: Optional[str] = None      # Login user (optional)
+
+
+@dataclass
+class WorkspaceNodeNetwork:
+    """Network information for a compute node."""
+    ip: Optional[str] = None        # Private IP / VPN IP / public IP
+    labels: dict = field(default_factory=dict)  # e.g. {"vpn": "tailscale"}
+
+
+@dataclass
+class WorkspaceNode:
+    """A compute resource: PC, VM, container, cloud instance, etc."""
+    id: str                         # Unique identifier (referenced by services)
+    name: str                       # Display name
+    role: str                       # "gateway" | "primary" | "worker" | any
+    os: str                         # "linux" | "macos" | "windows"
+    description: str = ""
+    access: Optional[WorkspaceNodeAccess] = None
+    network: Optional[WorkspaceNodeNetwork] = None
+    workspace_root: Optional[str] = None
+    services: list[str] = field(default_factory=list)  # service IDs on this node
+    labels: dict = field(default_factory=dict)          # free metadata
+
+
+@dataclass
+class WorkspaceService:
+    """A service running on a node: agent, server, database, worker, etc."""
+    id: str
+    name: str
+    type: str                       # "agent" | "server" | "database" | "worker"
+    node: Optional[str] = None      # node id
+    description: str = ""
+    knowledge_refs: list[str] = field(default_factory=list)
+    memory_refs: list[str] = field(default_factory=list)
+    skill_refs: list[str] = field(default_factory=list)
+    labels: dict = field(default_factory=dict)
+
 
 @dataclass
 class WorkspaceSymlink:
@@ -42,29 +88,17 @@ class WorkspaceSubRepo:
 
 
 @dataclass
-class WorkspaceMachine:
-    name: str
-    role: str                # "gateway" | "worker" | "primary"
-    os: str                  # "windows" | "macos" | "linux"
-    description: str = ""
-    ssh_host: Optional[str] = None
-    tailscale_ip: Optional[str] = None
-    workspace_root: Optional[str] = None
-    node_version: Optional[str] = None
-    openclaw_version: Optional[str] = None
-    agents: list[str] = field(default_factory=list)
-
-
-@dataclass
 class WorkspaceManifest:
     version: str
     workspace_root: str
     description: str = ""
     symlinks: list[WorkspaceSymlink] = field(default_factory=list)
     sub_repos: list[WorkspaceSubRepo] = field(default_factory=list)
-    machines: list[WorkspaceMachine] = field(default_factory=list)
+    nodes: list[WorkspaceNode] = field(default_factory=list)
+    services: list[WorkspaceService] = field(default_factory=list)
     cluster: dict = field(default_factory=dict)
-    agent_context: dict = field(default_factory=dict)
+    # Legacy field aliases (kept for render helpers)
+    knowledge_refs: dict = field(default_factory=dict)
     index_policy: dict = field(default_factory=dict)
 
 
@@ -75,36 +109,167 @@ class WorkspaceStatus:
     manifest_found: bool
     symlinks: list[dict] = field(default_factory=list)
     sub_repos: list[dict] = field(default_factory=list)
-    machines: list[dict] = field(default_factory=list)
+    nodes: list[dict] = field(default_factory=list)
     indexed_repos: list[str] = field(default_factory=list)
     total_nodes: int = 0
     total_edges: int = 0
 
 
 # ---------------------------------------------------------------------------
+# Schema migration helpers (v1.0 machines → v1.1 nodes/services)
+# ---------------------------------------------------------------------------
+
+def _migrate_machines_to_nodes(data: dict) -> dict:
+    """
+    Convert v1.0 'machines' schema to v1.1 'nodes'+'services' schema.
+    This allows backwards compatibility with old workspace.json files.
+    """
+    if "machines" not in data:
+        return data
+
+    nodes: list[dict] = []
+    services: list[dict] = []
+    existing_service_ids: set[str] = {s["id"] for s in data.get("services", [])}
+
+    for m in data["machines"]:
+        node_id = m.get("name", "").replace(" ", "-").lower()
+
+        # Build access object
+        ssh_host = m.get("ssh_host")
+        access = {"type": "ssh", "host": ssh_host} if ssh_host else {"type": "local"}
+
+        # Build network object — move tailscale_ip into network.ip + labels
+        network: dict = {}
+        if m.get("tailscale_ip"):
+            network["ip"] = m["tailscale_ip"]
+            network["labels"] = {"vpn": "tailscale"}
+
+        # Move tool-specific versions into labels
+        labels: dict = {}
+        if m.get("node_version"):
+            labels["node_version"] = m["node_version"]
+        if m.get("openclaw_version"):
+            labels["openclaw_version"] = m["openclaw_version"]
+
+        agent_ids = m.get("agents", [])
+
+        node: dict = {
+            "id": node_id,
+            "name": m.get("description", m.get("name", node_id)),
+            "role": m.get("role", "worker"),
+            "os": m.get("os", "linux"),
+            "description": m.get("description", ""),
+            "access": access,
+            "services": agent_ids,
+        }
+        if network:
+            node["network"] = network
+        if m.get("workspace_root"):
+            node["workspace_root"] = m["workspace_root"]
+        if labels:
+            node["labels"] = labels
+
+        nodes.append(node)
+
+        # Create minimal service entries for agents not already defined
+        for agent_id in agent_ids:
+            if agent_id not in existing_service_ids:
+                services.append({
+                    "id": agent_id,
+                    "name": agent_id,
+                    "type": "agent",
+                    "node": node_id,
+                })
+                existing_service_ids.add(agent_id)
+
+    # Migrate cluster section
+    cluster = dict(data.get("cluster", {}))
+    if cluster:
+        cluster_labels: dict = cluster.pop("labels", {})
+        for key in ("tailnet", "gateway_url", "openclaw_version", "network"):
+            if key in cluster:
+                cluster_labels[key] = cluster.pop(key)
+        if cluster_labels:
+            cluster["labels"] = cluster_labels
+        # Map total_agents → total_services
+        if "total_agents" in cluster:
+            cluster.setdefault("total_services", cluster.pop("total_agents"))
+
+    result = {k: v for k, v in data.items() if k not in ("machines", "cluster")}
+    result["nodes"] = nodes
+    result["services"] = data.get("services", []) + services
+    if cluster:
+        result["cluster"] = cluster
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Manifest loading
 # ---------------------------------------------------------------------------
 
+def _parse_node(raw: dict) -> WorkspaceNode:
+    access_raw = raw.get("access")
+    access = WorkspaceNodeAccess(**access_raw) if access_raw else None
+
+    network_raw = raw.get("network")
+    network = WorkspaceNodeNetwork(**network_raw) if network_raw else None
+
+    return WorkspaceNode(
+        id=raw["id"],
+        name=raw.get("name", raw["id"]),
+        role=raw.get("role", "worker"),
+        os=raw.get("os", "linux"),
+        description=raw.get("description", ""),
+        access=access,
+        network=network,
+        workspace_root=raw.get("workspace_root"),
+        services=raw.get("services", []),
+        labels=raw.get("labels", {}),
+    )
+
+
+def _parse_service(raw: dict) -> WorkspaceService:
+    return WorkspaceService(
+        id=raw["id"],
+        name=raw.get("name", raw["id"]),
+        type=raw.get("type", "agent"),
+        node=raw.get("node"),
+        description=raw.get("description", ""),
+        knowledge_refs=raw.get("knowledge_refs", []),
+        memory_refs=raw.get("memory_refs", []),
+        skill_refs=raw.get("skill_refs", []),
+        labels=raw.get("labels", {}),
+    )
+
+
 def load_manifest(repo_path: str | Path) -> Optional[WorkspaceManifest]:
-    """Load .gitnexus/workspace.json from a repo path."""
+    """Load .gitnexus/workspace.json from a repo path (v1.1 or v1.0)."""
     manifest_path = Path(repo_path) / ".gitnexus" / "workspace.json"
     if not manifest_path.exists():
         return None
     try:
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-        symlinks = [WorkspaceSymlink(**s) for s in data.get("symlinks", [])]
-        sub_repos = [WorkspaceSubRepo(**r) for r in data.get("sub_repos", [])]
-        machines = [WorkspaceMachine(**m) for m in data.get("machines", [])]
+        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        # Auto-migrate v1.0 machines schema to v1.1 nodes/services
+        if "machines" in raw:
+            raw = _migrate_machines_to_nodes(raw)
+
+        symlinks = [WorkspaceSymlink(**s) for s in raw.get("symlinks", [])]
+        sub_repos = [WorkspaceSubRepo(**r) for r in raw.get("sub_repos", [])]
+        nodes = [_parse_node(n) for n in raw.get("nodes", [])]
+        services = [_parse_service(s) for s in raw.get("services", [])]
+
         return WorkspaceManifest(
-            version=data.get("version", "1.0"),
-            workspace_root=data.get("workspace_root", ""),
-            description=data.get("description", ""),
+            version=raw.get("version", "1.0"),
+            workspace_root=raw.get("workspace_root", ""),
+            description=raw.get("description", ""),
             symlinks=symlinks,
             sub_repos=sub_repos,
-            machines=machines,
-            cluster=data.get("cluster", {}),
-            agent_context=data.get("agent_context", {}),
-            index_policy=data.get("index_policy", {}),
+            nodes=nodes,
+            services=services,
+            cluster=raw.get("cluster", {}),
+            knowledge_refs=raw.get("knowledge_refs", {}),
+            index_policy=raw.get("index_policy", {}),
         )
     except Exception as e:
         logger.error(f"Failed to load workspace manifest: {e}")
@@ -120,7 +285,6 @@ GITNEXUS_BIN = os.environ.get(
     os.path.expanduser("~/.local/bin/gitnexus-stable"),
 )
 if not os.path.exists(GITNEXUS_BIN):
-    # Fallback to PATH-based gitnexus
     GITNEXUS_BIN = "gitnexus"
 
 
@@ -186,6 +350,25 @@ def _repo_meta(repo_path: str | Path) -> dict:
         return {}
 
 
+def _node_display_name(node: WorkspaceNode) -> str:
+    """Get a concise display identifier for a node."""
+    if node.access:
+        if node.access.type == "ssh" and node.access.host:
+            return node.access.host
+        if node.access.type == "local":
+            return "(local)"
+        if node.access.type == "http" and node.access.host:
+            return node.access.host
+    return node.id
+
+
+def _node_ip(node: WorkspaceNode) -> str:
+    """Get IP string for display."""
+    if node.network and node.network.ip:
+        return node.network.ip
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Workspace commands
 # ---------------------------------------------------------------------------
@@ -239,22 +422,28 @@ def cmd_status(repo_path_str: str, as_json: bool = False) -> int:
                 "nodes": meta.get("stats", {}).get("nodes", 0),
             })
 
-        for m in manifest.machines:
-            status.machines.append({
-                "name": m.name,
-                "role": m.role,
-                "os": m.os,
-                "ssh_host": m.ssh_host,
-                "tailscale_ip": m.tailscale_ip,
-                "description": m.description,
-                "workspace_root": m.workspace_root,
-                "agent_count": len(m.agents),
-                "agents": m.agents,
-                "node_version": m.node_version,
-                "openclaw_version": m.openclaw_version,
+        # Build service lookup
+        service_map: dict[str, WorkspaceService] = {s.id: s for s in manifest.services}
+
+        for n in manifest.nodes:
+            svc_count = len(n.services)
+            ip = _node_ip(n)
+            access_str = _node_display_name(n)
+            status.nodes.append({
+                "id": n.id,
+                "name": n.name,
+                "role": n.role,
+                "os": n.os,
+                "description": n.description,
+                "access": access_str,
+                "ip": ip,
+                "workspace_root": n.workspace_root,
+                "service_count": svc_count,
+                "services": n.services,
+                "labels": n.labels,
             })
 
-    # Add the main workspace itself
+    # Add main workspace stats
     main_meta = _repo_meta(repo_path)
     status.total_nodes += main_meta.get("stats", {}).get("nodes", 0)
     status.total_edges += main_meta.get("stats", {}).get("edges", 0)
@@ -268,13 +457,15 @@ def cmd_status(repo_path_str: str, as_json: bool = False) -> int:
     print(f"  Workspace: {status.workspace_root}")
     print(f"  Path:      {status.workspace_path}")
     print(f"  Manifest:  {'✓ Found' if status.manifest_found else '✗ Not found (.gitnexus/workspace.json)'}")
+    if manifest and manifest.version:
+        print(f"  Schema:    v{manifest.version}")
     print(f"{'='*60}")
 
-    main_nodes = main_meta.get("stats", {}).get("nodes", 0)
-    main_edges = main_meta.get("stats", {}).get("edges", 0)
+    main_nodes_count = main_meta.get("stats", {}).get("nodes", 0)
+    main_edges_count = main_meta.get("stats", {}).get("edges", 0)
     main_indexed = repo_path.name in indexed or (repo_path / ".gitnexus" / "meta.json").exists()
     print(f"\n  [Main Repo]")
-    print(f"    {repo_path.name:30s}  {'✓' if main_indexed else '○'}  {main_nodes:6d} nodes  {main_edges:6d} edges")
+    print(f"    {repo_path.name:30s}  {'✓' if main_indexed else '○'}  {main_nodes_count:6d} nodes  {main_edges_count:6d} edges")
 
     if status.symlinks:
         print(f"\n  [Symlinks]")
@@ -286,26 +477,24 @@ def cmd_status(repo_path_str: str, as_json: bool = False) -> int:
             print(f"    {'':30s}     → {sl['resolved']}")
 
     if status.sub_repos:
-        print(f"\n  [Sub-repos in PROJECTS/]")
+        print(f"\n  [Sub-repos]")
         for sr in status.sub_repos:
             idx_mark = "✓" if sr["indexed"] else ("○" if sr["auto_index"] else "—")
             git_mark = "git" if sr["is_git_repo"] else "dir"
             nodes = sr["nodes"] if sr["nodes"] else "—"
             print(f"    {sr['name']:30s}  {idx_mark}  [{git_mark}]  {str(nodes):>6} nodes")
 
-    if status.machines:
-        total_agents = sum(m["agent_count"] for m in status.machines)
-        print(f"\n  [Cluster Machines] ({len(status.machines)} machines, {total_agents} agents)")
+    if status.nodes:
+        total_svcs = sum(n["service_count"] for n in status.nodes)
+        print(f"\n  [Nodes] ({len(status.nodes)} nodes, {total_svcs} services)")
         role_icons = {"gateway": "🌐", "worker": "⚙️", "primary": "💻"}
         os_icons = {"windows": "🪟", "macos": "🍎", "linux": "🐧"}
-        for m in status.machines:
-            role_icon = role_icons.get(m["role"], "?")
-            os_icon = os_icons.get(m["os"], "?")
-            ssh_info = f"ssh:{m['ssh_host']}" if m["ssh_host"] else "(local)"
-            ip_info = f"  {m['tailscale_ip']}" if m["tailscale_ip"] else ""
-            print(f"    {role_icon}{os_icon} {m['name']:25s}  [{m['role']:7s}]  {ssh_info:16s}{ip_info}")
-            print(f"       {m['description']}")
-            print(f"       agents({m['agent_count']}): {', '.join(m['agents'][:5])}{'...' if len(m['agents']) > 5 else ''}")
+        for n in status.nodes:
+            role_icon = role_icons.get(n["role"], "?")
+            os_icon = os_icons.get(n["os"], "?")
+            ip_part = f"  {n['ip']}" if n["ip"] else ""
+            print(f"    {role_icon}{os_icon} {n['id']:20s}  [{n['role']:7s}]  {n['access']:16s}{ip_part}")
+            print(f"       services({n['service_count']}): {', '.join(n['services'][:5])}{'...' if n['service_count'] > 5 else ''}")
 
     print(f"\n  Total indexed: {status.total_nodes:,} nodes  {status.total_edges:,} edges")
     print()
@@ -318,7 +507,7 @@ def cmd_analyze(repo_path_str: str, force: bool = True, dry_run: bool = False) -
     """
     Workspace-aware analyze:
     1. Analyze the main repo
-    2. For each symlink with index:true, analyze the target separately
+    2. For each symlink with index:true, analyze the target
     3. For each sub_repo with auto_index:true, analyze it
     """
     repo_path = Path(repo_path_str).resolve()
@@ -334,12 +523,8 @@ def cmd_analyze(repo_path_str: str, force: bool = True, dry_run: bool = False) -
     print(f"\n[workspace] Analyzing workspace: {manifest.workspace_root}")
     print(f"[workspace] Root: {repo_path}")
 
-    targets: list[tuple[str, Path]] = []
+    targets: list[tuple[str, Path]] = [("(main)", repo_path)]
 
-    # 1. Main repo
-    targets.append(("(main)", repo_path))
-
-    # 2. Symlinks with index:true
     for sl in manifest.symlinks:
         if not sl.index:
             print(f"[workspace]   skip symlink (index:false): {sl.name}")
@@ -350,7 +535,6 @@ def cmd_analyze(repo_path_str: str, force: bool = True, dry_run: bool = False) -
             continue
         targets.append((f"symlink:{sl.name}", resolved))
 
-    # 3. Sub-repos with auto_index:true
     for sr in manifest.sub_repos:
         if not sr.auto_index:
             continue
@@ -393,82 +577,104 @@ def cmd_analyze(repo_path_str: str, force: bool = True, dry_run: bool = False) -
 
 
 def cmd_cluster_status(repo_path_str: str, as_json: bool = False) -> int:
-    """Show cluster machine topology and agent distribution."""
+    """Show cluster node topology and service distribution."""
     repo_path = Path(repo_path_str).resolve()
     manifest = load_manifest(repo_path)
 
-    if not manifest or not manifest.machines:
-        print(f"[cluster] No machines defined in {repo_path}/.gitnexus/workspace.json")
-        print("[cluster] Add a 'machines' section to enable cluster topology view.")
+    if not manifest or not manifest.nodes:
+        print(f"[cluster] No nodes defined in {repo_path}/.gitnexus/workspace.json")
+        print("[cluster] Add a 'nodes' section to enable cluster topology view.")
         return 1
+
+    # Build service lookup
+    service_map: dict[str, WorkspaceService] = {s.id: s for s in manifest.services}
+    total_services = sum(len(n.services) for n in manifest.nodes)
 
     if as_json:
         data = {
             "workspace_root": manifest.workspace_root,
             "cluster": manifest.cluster,
-            "machines": [
+            "nodes": [
                 {
-                    "name": m.name,
-                    "role": m.role,
-                    "os": m.os,
-                    "ssh_host": m.ssh_host,
-                    "tailscale_ip": m.tailscale_ip,
-                    "description": m.description,
-                    "workspace_root": m.workspace_root,
-                    "node_version": m.node_version,
-                    "openclaw_version": m.openclaw_version,
-                    "agent_count": len(m.agents),
-                    "agents": m.agents,
+                    "id": n.id,
+                    "name": n.name,
+                    "role": n.role,
+                    "os": n.os,
+                    "description": n.description,
+                    "access": asdict(n.access) if n.access else None,
+                    "network": asdict(n.network) if n.network else None,
+                    "workspace_root": n.workspace_root,
+                    "service_count": len(n.services),
+                    "services": n.services,
+                    "labels": n.labels,
                 }
-                for m in manifest.machines
+                for n in manifest.nodes
             ],
         }
         print(json.dumps(data, indent=2, ensure_ascii=False))
         return 0
 
     cluster = manifest.cluster
-    total_agents = sum(len(m.agents) for m in manifest.machines)
+    cluster_labels = cluster.get("labels", {})
 
     print(f"\n{'='*70}")
     print(f"  Cluster: {manifest.workspace_root}")
-    if cluster:
-        print(f"  Network: {cluster.get('network', 'unknown')}  ({cluster.get('tailnet', '')})")
-        print(f"  Gateway URL: {cluster.get('gateway_url', '—')}")
-        print(f"  OpenClaw: {cluster.get('openclaw_version', '—')}")
-    print(f"  Machines: {len(manifest.machines)}  /  Agents: {total_agents}")
+    topology = cluster.get("topology", "")
+    transport = cluster.get("transport", cluster_labels.get("vpn", ""))
+    if topology or transport:
+        print(f"  Topology: {topology or '—'}  /  Transport: {transport or '—'}")
+    # Show tool-specific info from labels (if present)
+    if cluster_labels.get("gateway_url"):
+        print(f"  Gateway: {cluster_labels['gateway_url']}")
+    if cluster_labels.get("tailnet"):
+        print(f"  Network: {cluster_labels['tailnet']}")
+    print(f"  Nodes: {len(manifest.nodes)}  /  Services: {total_services}")
     print(f"{'='*70}")
 
     role_order = {"gateway": 0, "primary": 1, "worker": 2}
-    sorted_machines = sorted(manifest.machines, key=lambda m: role_order.get(m.role, 9))
+    sorted_nodes = sorted(manifest.nodes, key=lambda n: role_order.get(n.role, 9))
 
     role_icons = {"gateway": "🌐", "worker": "⚙️ ", "primary": "💻"}
-    os_icons = {"windows": "Win", "macos": "Mac", "linux": "Lnx"}
+    os_tags = {"windows": "Win", "macos": "Mac", "linux": "Lnx"}
 
     print()
-    for i, m in enumerate(sorted_machines):
-        role_icon = role_icons.get(m.role, "? ")
-        os_tag = os_icons.get(m.os, "?")
-        is_last = i == len(sorted_machines) - 1
+    for i, n in enumerate(sorted_nodes):
+        role_icon = role_icons.get(n.role, "? ")
+        os_tag = os_tags.get(n.os, "?")
+        is_last = i == len(sorted_nodes) - 1
         connector = "└──" if is_last else "├──"
+        indent = "   " if is_last else "│  "
 
-        ssh_str = f"ssh {m.ssh_host}" if m.ssh_host else "(local)"
-        ip_str = f"  [{m.tailscale_ip}]" if m.tailscale_ip else "  [local]"
+        # Access / connection info
+        access_str = _node_display_name(n)
+        if n.access and n.access.type == "ssh":
+            access_str = f"ssh {access_str}"
 
-        print(f"  {connector} {role_icon} [{os_tag}] {m.name}")
-        print(f"  {'   ' if is_last else '│  '}     {m.description}")
-        print(f"  {'   ' if is_last else '│  '}     {ssh_str}{ip_str}  Node.js {m.node_version or '—'}")
+        # IP info
+        ip_str = f"  [{_node_ip(n)}]" if _node_ip(n) else "  [local]"
 
-        # Agent list (wrapped at 5 per line)
-        agents = m.agents
-        if agents:
-            chunks = [agents[i:i+5] for i in range(0, len(agents), 5)]
-            prefix = "  {'   ' if is_last else '│  '}     agents: "
-            for j, chunk in enumerate(chunks):
-                indent = "  " + ("   " if is_last else "│  ") + "     "
+        # Version labels (any tool's version info)
+        version_parts = []
+        for k, v in n.labels.items():
+            if "version" in k.lower():
+                version_parts.append(f"{k}={v}")
+        version_str = "  " + ", ".join(version_parts[:2]) if version_parts else ""
+
+        print(f"  {connector} {role_icon} [{os_tag}] {n.id}  ({n.role})")
+        if n.description:
+            print(f"  {indent}     {n.description}")
+        print(f"  {indent}     {access_str}{ip_str}{version_str}")
+
+        # Service list (wrapped at 5 per line)
+        svcs = n.services
+        if svcs:
+            chunk_size = 5
+            for j in range(0, len(svcs), chunk_size):
+                chunk = svcs[j:j + chunk_size]
                 if j == 0:
-                    print(f"{indent}agents({len(agents)}): {', '.join(chunk)}")
+                    print(f"  {indent}     services({len(svcs)}): {', '.join(chunk)}")
                 else:
-                    print(f"{indent}         {', '.join(chunk)}")
+                    print(f"  {indent}              {', '.join(chunk)}")
         print()
 
     print(f"  Legend: 🌐=gateway  💻=primary(local)  ⚙️=worker")
@@ -481,7 +687,6 @@ def cmd_query(repo_path_str: str, query: str, as_json: bool = False) -> int:
     repo_path = Path(repo_path_str).resolve()
     manifest = load_manifest(repo_path)
 
-    # Collect all repos to search
     repos: list[tuple[str, Path]] = [(repo_path.name, repo_path)]
 
     if manifest:
