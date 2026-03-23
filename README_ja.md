@@ -102,6 +102,73 @@ gni smoke ~/dev/my-repo my-repo MyClassName
 
 ---
 
+## Agent Context Graph
+
+> **v1.3 新機能** — エージェント・スキル・インフラをクエリ可能なナレッジグラフとしてインデックス化します。
+
+### 概要
+
+コードシンボルに加え、gitnexus-stable-ops はワークスペースの**エージェントレベルのエンティティ**もインデックス化します:
+
+| エンティティ | ソース | 説明 |
+|------------|--------|------|
+| `Agent` | `KNOWLEDGE/AGENTS_*.md` | 役割・ペインID・所属ソサエティを持つ名前付きエージェント |
+| `Skill` | `SKILL/**/*.md` | 優先度・キーワード・スクリプトパスを持つスキル |
+| `KnowledgeDoc` | `KNOWLEDGE/**/*.md` | リファレンスドキュメント・コンテキストファイル |
+| `MemoryDoc` | `MEMORY/**/*.md` | セッションメモリ・日次ログ |
+| `ComputeNode` | `workspace.json nodes[]` | クラスターの物理/仮想マシン |
+| `WorkspaceService` | `workspace.json services[]` | デプロイ済みエージェント/サービス（モデル情報付き） |
+
+### Progressive Disclosure（段階的開示）
+
+3 段階の詳細レベルでグラフをクエリできます:
+
+| レベル | トークン数 | ユースケース |
+|--------|----------|------------|
+| `--level 1` | ~100 | LLM システムプロンプト概要 — 「何が存在するか」 |
+| `--level 2` | ~400 | デフォルトのコンテキスト注入 — 名前 + 役割 + 説明 |
+| `--level 3` | ~2000 | 詳細調査 — 全フィールド + エッジ + 読み込むべきファイル |
+
+```bash
+# エージェントグラフのビルド
+gni agent-index ~/dev/MY_WORKSPACE --force
+
+# 異なる詳細レベルでクエリ
+gni aq "deploy"           --level 1   # 概要: エージェントIDのみ
+gni aq "cc-hayashi"       --level 2   # 標準: 名前 + 役割 + 説明
+gni aq "announce"         --level 3   # 詳細: 全フィールド + エッジ + ファイルパス
+
+# LLM システムプロンプトへの注入
+CONTEXT=$(gni aq "all agents" --level 2 --format progressive)
+
+# 機械可読な JSON 出力
+gni agent-query "announce" --format json
+```
+
+### Workspace Manifest (`workspace.json`)
+
+クラスタートポロジーを一度定義すれば、どこからでもクエリできます:
+
+```json
+{
+  "nodes": [
+    { "id": "macbook", "role": "primary", "os": "macos" }
+  ],
+  "services": [
+    { "id": "cc-hayashi", "type": "agent", "node": "macbook",
+      "labels": { "model": "claude-sonnet-4-6" } }
+  ],
+  "knowledge_refs": {
+    "skills_dir": "SKILL",
+    "memory_dir": "MEMORY"
+  }
+}
+```
+
+詳細は [docs/agent-context-graph.md](./docs/agent-context-graph.md) を参照してください。
+
+---
+
 ## スクリプト一覧
 
 | スクリプト | 用途 |

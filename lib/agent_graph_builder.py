@@ -798,6 +798,14 @@ def insert_nodes(
     """Insert all nodes into the database."""
     ts = time.strftime("%Y-%m-%dT%H:%M:%S")
 
+    # Helper: remove existing FTS5 entry by node_id (prevents duplicates on incremental rebuild)
+    def _fts_upsert(node_id: str, node_type: str, name: str, keywords: str, desc: str):
+        conn.execute("DELETE FROM agent_fts WHERE node_id = ?", (node_id,))
+        conn.execute(
+            "INSERT INTO agent_fts VALUES (?,?,?,?,?)",
+            (node_id, node_type, name, keywords, desc),
+        )
+
     # Agents
     for a in agents:
         conn.execute(
@@ -805,12 +813,8 @@ def insert_nodes(
             (a.agent_id, a.name, a.emoji, a.role, a.society, a.type,
              a.pane_id, a.node_binding, json.dumps(a.keywords, ensure_ascii=False)),
         )
-        # FTS5
-        conn.execute(
-            "INSERT INTO agent_fts VALUES (?,?,?,?,?)",
-            (a.agent_id, "Agent", a.name,
-             " ".join(a.keywords), a.role),
-        )
+        # FTS5 upsert (description = role for Agents to enable description display)
+        _fts_upsert(a.agent_id, "Agent", a.name, " ".join(a.keywords), a.role)
 
     # Skills
     for s in skills:
@@ -820,11 +824,7 @@ def insert_nodes(
              s.description, json.dumps(s.keywords, ensure_ascii=False),
              json.dumps(s.scripts), json.dumps(s.tags)),
         )
-        conn.execute(
-            "INSERT INTO agent_fts VALUES (?,?,?,?,?)",
-            (s.skill_id, "Skill", s.name,
-             " ".join(s.keywords), s.description),
-        )
+        _fts_upsert(s.skill_id, "Skill", s.name, " ".join(s.keywords), s.description)
 
     # Knowledge
     for k in knowledge:
@@ -833,10 +833,7 @@ def insert_nodes(
             (k.doc_id, k.title, k.path, k.category, k.type,
              k.content_summary, k.token_estimate, k.last_modified),
         )
-        conn.execute(
-            "INSERT INTO agent_fts VALUES (?,?,?,?,?)",
-            (k.doc_id, "KnowledgeDoc", k.title, "", ""),
-        )
+        _fts_upsert(k.doc_id, "KnowledgeDoc", k.title, "", "")
 
     # DataSources
     for d in data_sources:
@@ -861,12 +858,8 @@ def insert_nodes(
              cn.access_type, cn.ssh_host, cn.ssh_user, cn.ip_address,
              cn.vpn, cn.workspace_root, json.dumps(cn.labels, ensure_ascii=False)),
         )
-        conn.execute(
-            "INSERT INTO agent_fts VALUES (?,?,?,?,?)",
-            (cn.node_id, "ComputeNode", cn.name,
-             f"{cn.ip_address} {cn.ssh_host} {cn.os}",
-             cn.description),
-        )
+        _fts_upsert(cn.node_id, "ComputeNode", cn.name,
+                    f"{cn.ip_address} {cn.ssh_host} {cn.os}", cn.description)
 
     # Workspace Services (agent deployments from workspace.json)
     for ws in (ws_services or []):
@@ -875,12 +868,8 @@ def insert_nodes(
             (ws.service_id, ws.name, ws.service_type, ws.node_id, ws.description,
              ws.model, json.dumps(ws.labels, ensure_ascii=False)),
         )
-        conn.execute(
-            "INSERT INTO agent_fts VALUES (?,?,?,?,?)",
-            (f"ws_{ws.service_id}", "WorkspaceService", ws.name,
-             f"{ws.model} {ws.service_type}",
-             ws.description),
-        )
+        _fts_upsert(f"ws_{ws.service_id}", "WorkspaceService", ws.name,
+                    f"{ws.model} {ws.service_type}", ws.description)
 
     conn.commit()
 
@@ -1226,6 +1215,11 @@ def build_agent_graph(
     if force:
         logger.info("Force mode: clearing existing data")
         clear_agent_graph(conn)
+    else:
+        # Incremental build: clear only edges (nodes use INSERT OR REPLACE for dedup;
+        # edges lack UNIQUE constraint so must be re-generated each run)
+        conn.execute("DELETE FROM agent_relations")
+        conn.commit()
 
     try:
         insert_nodes(conn, agents, skills, all_knowledge, data_sources, services,
@@ -1247,7 +1241,6 @@ def get_agent_graph_stats(db_path: Path) -> dict:
     conn = sqlite3.connect(str(db_path))
     stats = {}
     for table, label in [("agents", "agents"), ("skills", "skills"),
-                          ("knowledge_docs", "knowledge_docs"),
                           ("data_sources", "data_sources"),
                           ("external_services", "external_services"),
                           ("compute_nodes", "compute_nodes"),
@@ -1258,10 +1251,25 @@ def get_agent_graph_stats(db_path: Path) -> dict:
         except sqlite3.OperationalError:
             stats[label] = 0  # table may not exist in older DBs
 
+    # knowledge_docs: split into knowledge (non-memory) and memory_docs
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM knowledge_docs WHERE type != 'memory-md'"
+        ).fetchone()
+        stats["knowledge_docs"] = row[0] if row else 0
+        row = conn.execute(
+            "SELECT COUNT(*) FROM knowledge_docs WHERE type = 'memory-md'"
+        ).fetchone()
+        stats["memory_docs"] = row[0] if row else 0
+    except sqlite3.OperationalError:
+        stats["knowledge_docs"] = 0
+        stats["memory_docs"] = 0
+
     row = conn.execute("SELECT COUNT(*) FROM agent_relations").fetchone()
     stats["edges"] = row[0] if row else 0
     stats["total_nodes"] = sum(stats[k] for k in
                                 ("agents", "skills", "knowledge_docs",
+                                 "memory_docs",
                                  "data_sources", "external_services",
                                  "compute_nodes", "workspace_services"))
 

@@ -186,6 +186,73 @@ volumes:
 
 ---
 
+## Agent Context Graph
+
+> **New in v1.3** — Index your agents, skills, and infrastructure as a queryable knowledge graph.
+
+### What it is
+
+Beyond code symbols, gitnexus-stable-ops indexes **agent-level entities** from your workspace:
+
+| Entity | Source | Description |
+|--------|--------|-------------|
+| `Agent` | `KNOWLEDGE/AGENTS_*.md` frontmatter | Named agents with roles, pane IDs, society membership |
+| `Skill` | `SKILL/**/*.md` | Skills with priority, keywords, script paths |
+| `KnowledgeDoc` | `KNOWLEDGE/**/*.md` | Reference docs and context files |
+| `MemoryDoc` | `MEMORY/**/*.md` | Session memories and daily logs |
+| `ComputeNode` | `workspace.json nodes[]` | Physical/virtual machines in your cluster |
+| `WorkspaceService` | `workspace.json services[]` | Deployed agents/services with model info |
+
+### Progressive Disclosure
+
+Query the graph at three levels of detail:
+
+| Level | Tokens | Use case |
+|-------|--------|----------|
+| `--level 1` | ~100 | LLM system prompt overview — "what exists?" |
+| `--level 2` | ~400 | Default context injection — names + roles + descriptions |
+| `--level 3` | ~2000 | Deep dive — full info + edges + files to read |
+
+```bash
+# Build the agent graph
+gni agent-index ~/dev/MY_WORKSPACE --force
+
+# Query at different detail levels
+gni aq "deploy agent"     --level 1   # Overview: agent IDs only
+gni aq "cc-hayashi"       --level 2   # Standard: name + role + description
+gni aq "announce skill"   --level 3   # Full: all fields + edges + file paths
+
+# Inject into LLM system prompt
+CONTEXT=$(gni aq "all agents" --level 2 --format progressive)
+
+# Machine-readable output
+gni agent-query "announce" --format json
+```
+
+### Workspace Manifest (`workspace.json`)
+
+Declare your cluster topology once, query everywhere:
+
+```json
+{
+  "nodes": [
+    { "id": "macbook", "role": "primary", "os": "macos" }
+  ],
+  "services": [
+    { "id": "cc-hayashi", "type": "agent", "node": "macbook",
+      "labels": { "model": "claude-sonnet-4-6" } }
+  ],
+  "knowledge_refs": {
+    "skills_dir": "SKILL",
+    "memory_dir": "MEMORY"
+  }
+}
+```
+
+See [docs/agent-context-graph.md](./docs/agent-context-graph.md) for the complete guide.
+
+---
+
 ## Features
 
 | Script | Purpose |
@@ -359,6 +426,7 @@ Miyabi G.K. offers:
 
 ## Documentation
 
+- [Agent Context Graph](docs/agent-context-graph.md) — Index and query agents, skills, and infrastructure
 - [Runbook](docs/runbook.md) — Step-by-step operational procedures
 - [Architecture](docs/architecture.md) — Design principles and data flow
 - [MCP Integration](docs/mcp-integration.md) — MCP server configuration
