@@ -126,6 +126,7 @@ AGENT_GRAPH_PY="$SCRIPT_DIR/../lib/agent_graph_builder.py"
 CONTEXT_RESOLVER_PY="$SCRIPT_DIR/../lib/context_resolver.py"
 MCP_SERVER_PY="$SCRIPT_DIR/../lib/mcp_server.py"
 AGENT_REINDEX_SH="$SCRIPT_DIR/gitnexus-agent-reindex.sh"
+WORKSPACE_BUILDER_PY="$SCRIPT_DIR/../lib/workspace_builder.py"
 
 cmd_agent_index() {
   local repo_path="${1:-$PWD}"
@@ -211,6 +212,33 @@ cmd_agent_context() {
   python3 "$CONTEXT_RESOLVER_PY" "$query" --repo "$repo_path" --db "$db_path" "${extra_args[@]}"
 }
 
+## --- Workspace Commands ---
+
+cmd_workspace_status() {
+  local repo_path="${1:-$PWD}"
+  shift || true
+  repo_path="$(cd "$repo_path" 2>/dev/null && pwd)" || { _err "Directory not found: $repo_path"; return 1; }
+  python3 "$WORKSPACE_BUILDER_PY" status "$repo_path" "$@"
+}
+
+cmd_workspace_analyze() {
+  local repo_path="${1:-$PWD}"
+  shift || true
+  repo_path="$(cd "$repo_path" 2>/dev/null && pwd)" || { _err "Directory not found: $repo_path"; return 1; }
+  _log "Workspace-aware analyze: $repo_path"
+  python3 "$WORKSPACE_BUILDER_PY" analyze "$repo_path" "$@"
+}
+
+cmd_workspace_query() {
+  local query="${1:-}"
+  shift || true
+  local repo_path="${1:-$PWD}"
+  shift || true
+  repo_path="$(cd "$repo_path" 2>/dev/null && pwd)" || { _err "Directory not found: $repo_path"; return 1; }
+  [[ -z "$query" ]] && { _err "Usage: gni workspace-query <query> [repo-path]"; return 1; }
+  python3 "$WORKSPACE_BUILDER_PY" query "$repo_path" --query "$query" "$@"
+}
+
 ## --- Agent Graph Commands (Phase 4/5) ---
 
 cmd_agent_reindex() {
@@ -253,6 +281,15 @@ Agent Graph (Phase 2):
 Agent Graph (Phase 4/5):
   gni agent-reindex [repo-path] [--force]  Rebuild Agent Graph (smart diff)
   gni agent-mcp                            Start MCP server (stdio)
+
+Workspace (cross-repo + symlink aware):
+  gni workspace-status [repo-path] [--json]   Show workspace structure & index state
+  gni workspace-analyze [repo-path] [--dry-run]  Index main + symlinks + sub-repos
+  gni workspace-query "<query>" [repo-path]   Cross-workspace search
+  (aliases: ws-status, ws-analyze, ws-query)
+
+  Requires: .gitnexus/workspace.json in the workspace root.
+  Schema: https://github.com/ShunsukeHayashi/gitnexus-stable-ops/blob/main/docs/workspace.md
 EOF
 }
 
@@ -275,6 +312,9 @@ main() {
     agent-context) cmd_agent_context "$@" ;;
     agent-reindex) cmd_agent_reindex "$@" ;;
     agent-mcp) cmd_agent_mcp "$@" ;;
+    workspace-status|ws-status) cmd_workspace_status "$@" ;;
+    workspace-analyze|ws-analyze) cmd_workspace_analyze "$@" ;;
+    workspace-query|ws-query) cmd_workspace_query "$@" ;;
     help|--help|-h) cmd_help ;;
     *) _gitnexus "$cmd" "$@" ;;
   esac
