@@ -18,7 +18,7 @@ jobs:
     steps:
       - name: Check if Copilot already assigned
         id: check
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           result-encoding: string
           script: |
@@ -37,7 +37,7 @@ jobs:
 
       - name: Assign Copilot via GraphQL
         if: steps.check.outputs.result == 'no'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           # GITHUB_TOKEN で動作（PAT 不要）
           # 修正: agentAssignment.targetRepositoryId が必須。ないと silent fail する。

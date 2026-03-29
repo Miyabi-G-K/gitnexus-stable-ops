@@ -27,7 +27,7 @@ jobs:
       contents: write
     steps:
       - name: Check CI status and AI review approval
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             let prNumber;
