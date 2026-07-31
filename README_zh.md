@@ -5,7 +5,7 @@
 **用于在生产环境中稳定运行 [GitNexus](https://github.com/abhigyanpatwari/GitNexus) 的运维工具集，支持固定版本的 CLI/MCP 工作流。**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub Stars](https://img.shields.io/github/stars/Miyabi-G-K/gitnexus-stable-ops?style=social)](https://github.com/Miyabi-G-K/gitnexus-stable-ops)
+[![GitHub Stars](https://img.shields.io/github/stars/ShunsukeHayashi/gitnexus-stable-ops?style=social)](https://github.com/ShunsukeHayashi/gitnexus-stable-ops)
 
 由 [合同会社みやび (Miyabi G.K.)](https://miyabi-ai.jp) 构建 — 在生产环境中管理 25+ 个使用 GitNexus 索引的仓库。
 
@@ -47,7 +47,7 @@ GitNexus 非常强大，但在多仓库的生产环境中运行它会带来以�
 ### 一键安装（推荐）
 
 ```bash
-git clone https://github.com/Miyabi-G-K/gitnexus-stable-ops.git
+git clone https://github.com/ShunsukeHayashi/gitnexus-stable-ops.git
 cd gitnexus-stable-ops
 make install
 ```
@@ -60,7 +60,7 @@ make install
 ### 手动安装
 
 ```bash
-git clone https://github.com/Miyabi-G-K/gitnexus-stable-ops.git
+git clone https://github.com/ShunsukeHayashi/gitnexus-stable-ops.git
 cd gitnexus-stable-ops
 ln -s $(PWD)/bin/gni ~/.local/bin/gni
 chmod +x bin/*
