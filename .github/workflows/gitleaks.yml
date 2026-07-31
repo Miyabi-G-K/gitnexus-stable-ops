@@ -36,7 +36,6 @@ jobs:
       - name: Scan full history
         run: |
           gitleaks git \
-            --config .gitleaks.toml \
             --redact \
             --verbose \
             --exit-code 1
