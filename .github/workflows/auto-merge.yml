@@ -74,6 +74,12 @@ jobs:
               return;
             }
 
+            // Fork からの PR は自動マージ対象外
+            if (pr.data.head.repo.full_name !== pr.data.base.repo.full_name) {
+              console.log(`PR #${prNumber} comes from a fork (${pr.data.head.repo.full_name}), skipping`);
+              return;
+            }
+
             // Copilot 作成でなければスキップ
             if (pr.data.user.login !== 'Copilot') {
               console.log(`PR #${prNumber} is not from Copilot (${pr.data.user.login}), skipping`);

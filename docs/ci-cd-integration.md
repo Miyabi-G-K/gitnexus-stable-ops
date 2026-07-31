@@ -56,7 +56,7 @@ jobs:
 
       - name: Install gitnexus-stable-ops
         run: |
-          git clone https://github.com/ShunsukeHayashi/gitnexus-stable-ops /opt/stable-ops
+          git clone https://github.com/Miyabi-G-K/gitnexus-stable-ops /opt/stable-ops
           cd /opt/stable-ops && make install
 
       - name: Smart reindex (skip if up-to-date)
@@ -101,7 +101,7 @@ jobs:
       - name: Install tools
         run: |
           npm install -g gitnexus@1.4.6
-          git clone https://github.com/ShunsukeHayashi/gitnexus-stable-ops /opt/stable-ops
+          git clone https://github.com/Miyabi-G-K/gitnexus-stable-ops /opt/stable-ops
           cd /opt/stable-ops && make install
 
       - name: Run impact analysis on changed files
@@ -164,7 +164,7 @@ jobs:
       - name: Install tools
         run: |
           npm install -g gitnexus@1.4.6
-          git clone https://github.com/ShunsukeHayashi/gitnexus-stable-ops /opt/stable-ops
+          git clone https://github.com/Miyabi-G-K/gitnexus-stable-ops /opt/stable-ops
           cd /opt/stable-ops && make install
 
       - name: Full reindex with embeddings
@@ -198,7 +198,7 @@ variables:
 .gitnexus_setup: &gitnexus_setup
   before_script:
     - npm install -g gitnexus@${GITNEXUS_VERSION}
-    - git clone https://github.com/ShunsukeHayashi/gitnexus-stable-ops /opt/stable-ops
+    - git clone https://github.com/Miyabi-G-K/gitnexus-stable-ops /opt/stable-ops
     - cd /opt/stable-ops && make install
 
 impact-analysis:
@@ -388,7 +388,7 @@ RUN apt-get update && apt-get install -y git jq python3 curl && rm -rf /var/lib/
 RUN npm install -g gitnexus@1.4.6
 
 # Install stable-ops
-RUN git clone https://github.com/ShunsukeHayashi/gitnexus-stable-ops /opt/stable-ops \
+RUN git clone https://github.com/Miyabi-G-K/gitnexus-stable-ops /opt/stable-ops \
     && cd /opt/stable-ops && make install
 
 ENV GITNEXUS_BIN=/root/.local/bin/gitnexus-stable

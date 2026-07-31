@@ -29,7 +29,7 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 ## Development Setup
 
 ```bash
-git clone https://github.com/ShunsukeHayashi/gitnexus-stable-ops.git
+git clone https://github.com/Miyabi-G-K/gitnexus-stable-ops.git
 cd gitnexus-stable-ops
 # Follow README.md for setup instructions
 ```
