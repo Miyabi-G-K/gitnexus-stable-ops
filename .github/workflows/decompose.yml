@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: Write issue data to file
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -113,7 +113,7 @@ jobs:
 
       - name: Create atomic sub-issues
         if: steps.analyze.outputs.atomic == 'false'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -197,7 +197,7 @@ jobs:
 
       - name: Mark as atomic (no decomposition needed)
         if: steps.analyze.outputs.atomic == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             // atomic ラベルを追加。copilot-assign.yml がそのまま処理する。
