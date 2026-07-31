@@ -28,7 +28,7 @@ services:
     image: node:22-slim
     command: >
       bash -c "npm install -g gitnexus@1.4.6 &&
-               git clone https://github.com/Miyabi-G-K/gitnexus-stable-ops /opt/stable-ops &&
+               git clone https://github.com/ShunsukeHayashi/gitnexus-stable-ops /opt/stable-ops &&
                cd /opt/stable-ops && make install && cron -f"
     volumes:
       - ./repos:/repos:ro
@@ -180,7 +180,7 @@ jobs:
 
     - name: Install gitnexus-stable-ops
       run: |
-        git clone https://github.com/Miyabi-G-K/gitnexus-stable-ops /opt/stable-ops
+        git clone https://github.com/ShunsukeHayashi/gitnexus-stable-ops /opt/stable-ops
         cd /opt/stable-ops && make install
 
     - name: Smart reindex
@@ -410,4 +410,4 @@ A: See [CHANGELOG.md](../CHANGELOG.md) for release history and [CONTRIBUTING.md]
 
 ---
 
-*For questions not covered here, open a [GitHub Issue](https://github.com/Miyabi-G-K/gitnexus-stable-ops/issues) or contact [shunsuke.hayashi@miyabi-ai.jp](mailto:shunsuke.hayashi@miyabi-ai.jp).*
+*For questions not covered here, open a [GitHub Issue](https://github.com/ShunsukeHayashi/gitnexus-stable-ops/issues) or contact [shunsuke.hayashi@miyabi-ai.jp](mailto:shunsuke.hayashi@miyabi-ai.jp).*
