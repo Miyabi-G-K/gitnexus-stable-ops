@@ -2,8 +2,8 @@
 
 [English](./README.md) | [中文](./README_zh.md) | **日本語**
 
-[![CI](https://github.com/ShunsukeHayashi/gitnexus-stable-ops/actions/workflows/ci.yml/badge.svg)](https://github.com/ShunsukeHayashi/gitnexus-stable-ops/actions)
-[![Stars](https://img.shields.io/github/stars/ShunsukeHayashi/gitnexus-stable-ops?style=flat-square&color=yellow)](https://github.com/ShunsukeHayashi/gitnexus-stable-ops/stargazers)
+[![CI](https://github.com/Miyabi-G-K/gitnexus-stable-ops/actions/workflows/ci.yml/badge.svg)](https://github.com/Miyabi-G-K/gitnexus-stable-ops/actions)
+[![Stars](https://img.shields.io/github/stars/Miyabi-G-K/gitnexus-stable-ops?style=flat-square&color=yellow)](https://github.com/Miyabi-G-K/gitnexus-stable-ops/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Featured in GitNexus Community Integrations](https://img.shields.io/badge/GitNexus-Community%20Integration-4A90D9?style=flat-square&logo=github)](https://github.com/abhigyanpatwari/GitNexus#community-integrations)
 
@@ -87,7 +87,7 @@ graph TB
 
 ```bash
 # 1. インストール
-git clone https://github.com/ShunsukeHayashi/gitnexus-stable-ops.git
+git clone https://github.com/Miyabi-G-K/gitnexus-stable-ops.git
 cd gitnexus-stable-ops && make install
 
 # 2. リポジトリのヘルスチェック
@@ -273,7 +273,7 @@ bash 4.0+    git 2.0+    jq 1.6+    python 3.6+
 
 ### v1.4 (2026 Q3)
 - [ ] マルチノード分散再インデックスオーケストレーション
-- [ ] GitHub Actions コンポジットアクション (`uses: ShunsukeHayashi/gitnexus-stable-ops@v1`)
+- [ ] GitHub Actions コンポジットアクション (`uses: Miyabi-G-K/gitnexus-stable-ops@v1`)
 - [ ] グラフ健全性可視化ウェブダッシュボード
 
 ### v2.0 (2026 Q4)
@@ -310,7 +310,7 @@ bash 4.0+    git 2.0+    jq 1.6+    python 3.6+
 ## コントリビューション
 
 ```bash
-git clone https://github.com/ShunsukeHayashi/gitnexus-stable-ops.git
+git clone https://github.com/Miyabi-G-K/gitnexus-stable-ops.git
 cd gitnexus-stable-ops
 make test
 ```

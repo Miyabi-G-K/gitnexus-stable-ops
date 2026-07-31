@@ -5,8 +5,8 @@
 Stop Copilot and Claude Code from breaking callers they don't know about.
 `gitnexus-stable-ops` is a production ops toolkit that keeps [GitNexus](https://github.com/abhigyanpatwari/GitNexus) running reliably across 25+ repositories — zero embedding loss, zero version drift, zero dirty-graph surprises.
 
-[![CI](https://github.com/ShunsukeHayashi/gitnexus-stable-ops/actions/workflows/ci.yml/badge.svg)](https://github.com/ShunsukeHayashi/gitnexus-stable-ops/actions/workflows/ci.yml)
-[![Stars](https://img.shields.io/github/stars/ShunsukeHayashi/gitnexus-stable-ops?style=social)](https://github.com/ShunsukeHayashi/gitnexus-stable-ops)
+[![CI](https://github.com/Miyabi-G-K/gitnexus-stable-ops/actions/workflows/ci.yml/badge.svg)](https://github.com/Miyabi-G-K/gitnexus-stable-ops/actions/workflows/ci.yml)
+[![Stars](https://img.shields.io/github/stars/Miyabi-G-K/gitnexus-stable-ops?style=social)](https://github.com/Miyabi-G-K/gitnexus-stable-ops)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Featured in GitNexus](https://img.shields.io/badge/GitNexus-Community%20Integration-blue?logo=github)](https://github.com/abhigyanpatwari/GitNexus#community-integrations)
 
@@ -22,7 +22,7 @@ Stop Copilot and Claude Code from breaking callers they don't know about.
 ## Quick Start
 
 ```bash
-git clone https://github.com/ShunsukeHayashi/gitnexus-stable-ops.git
+git clone https://github.com/Miyabi-G-K/gitnexus-stable-ops.git
 cd gitnexus-stable-ops && make install
 
 # Diagnose a repo
@@ -204,7 +204,7 @@ For the full guide, see [docs/agent-context-graph.md](./docs/agent-context-graph
 ```dockerfile
 FROM node:22-slim
 RUN npm install -g gitnexus@1.4.6
-RUN git clone https://github.com/ShunsukeHayashi/gitnexus-stable-ops.git /opt/stable-ops \
+RUN git clone https://github.com/Miyabi-G-K/gitnexus-stable-ops.git /opt/stable-ops \
     && cd /opt/stable-ops && make install
 RUN ln -sf $(which gitnexus) /usr/local/bin/gitnexus-stable
 ENV GITNEXUS_BIN=/usr/local/bin/gitnexus-stable

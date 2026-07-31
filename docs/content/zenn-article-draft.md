@@ -38,7 +38,7 @@ GitNexus の基本設計は「1リポジトリをローカルで解析する」�
 - CI/CD や cron で自動再インデックスを走らせると、副作用が出る
 - `gitnexus impact` が断続的に失敗すると、ワークフロー全体がブロックされる
 
-私自身、25リポジトリ・32K以上のシンボル・73K以上のエッジという規模で本番運用し、これらの問題に一つずつ直面しました。その経験から生まれたのが **[gitnexus-stable-ops](https://github.com/ShunsukeHayashi/gitnexus-stable-ops)** です。
+私自身、25リポジトリ・32K以上のシンボル・73K以上のエッジという規模で本番運用し、これらの問題に一つずつ直面しました。その経験から生まれたのが **[gitnexus-stable-ops](https://github.com/Miyabi-G-K/gitnexus-stable-ops)** です。
 
 ---
 
@@ -238,7 +238,7 @@ gitnexus-stable-ops/
 ### インストール
 
 ```bash:インストール手順
-git clone https://github.com/ShunsukeHayashi/gitnexus-stable-ops.git
+git clone https://github.com/Miyabi-G-K/gitnexus-stable-ops.git
 cd gitnexus-stable-ops
 make install
 ```
@@ -333,10 +333,10 @@ GitNexus 単体は非常に強力なツールです。しかし本番環境・�
 3. **dirty worktree はデフォルトでスキップする**
 4. **`impact` コマンドの失敗に備えたフォールバックを用意する**
 
-[gitnexus-stable-ops](https://github.com/ShunsukeHayashi/gitnexus-stable-ops) はこれらを Shell スクリプトとして実装し、cron や Git hooks と組み合わせて完全自動化します。インストールは `make install` の一行です。
+[gitnexus-stable-ops](https://github.com/Miyabi-G-K/gitnexus-stable-ops) はこれらを Shell スクリプトとして実装し、cron や Git hooks と組み合わせて完全自動化します。インストールは `make install` の一行です。
 
 GitNexus 本家の素晴らしい設計の上に、本番運用の安定性を加えるレイヤーとして使ってみてください。
 
-**リポジトリ**: https://github.com/ShunsukeHayashi/gitnexus-stable-ops
+**リポジトリ**: https://github.com/Miyabi-G-K/gitnexus-stable-ops
 
 GitNexus 本家: https://github.com/abhigyanpatwari/GitNexus
