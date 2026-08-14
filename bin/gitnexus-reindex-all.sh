@@ -36,6 +36,10 @@ jq -r '.[].path' "$REGISTRY_PATH" | while IFS= read -r repo_path; do
   if [[ -n "$embedding_flag_value" ]]; then
     analyze_args+=("$embedding_flag_value")
   fi
+  injection_flag_value="$(injection_flag)"
+  if [[ -n "$injection_flag_value" ]]; then
+    analyze_args+=("$injection_flag_value")
+  fi
 
   echo "== Reindex: $repo_path =="
   (

@@ -41,6 +41,10 @@ if [[ "$FORCE_REINDEX" == "1" ]]; then
     if [[ -n "$embedding_flag" ]]; then
       analyze_args+=("$embedding_flag")
     fi
+    injection_flag_value="$(injection_flag)"
+    if [[ -n "$injection_flag_value" ]]; then
+      analyze_args+=("$injection_flag_value")
+    fi
     (cd "$REPO_PATH" && "$GITNEXUS_BIN" "${analyze_args[@]}" >"$SMOKE_TMP/analyze.log" 2>&1)
   fi
 fi

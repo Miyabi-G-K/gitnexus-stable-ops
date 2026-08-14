@@ -91,6 +91,11 @@ run_reindex() {
   if [[ -n "$maybe_embeddings" ]]; then
     analyze_args+=("$maybe_embeddings")
   fi
+  local maybe_injection
+  maybe_injection="$(injection_flag)"
+  if [[ -n "$maybe_injection" ]]; then
+    analyze_args+=("$maybe_injection")
+  fi
 
   log INFO "running: $GITNEXUS_BIN ${analyze_args[*]}"
   (
