@@ -42,6 +42,11 @@ _reindex_dir() {
     if _has_embeddings "$dir"; then
       analyze_args+=(--embeddings)
     fi
+    local injection_flag_value
+    injection_flag_value="$(injection_flag)"
+    if [[ -n "$injection_flag_value" ]]; then
+      analyze_args+=("$injection_flag_value")
+    fi
     if (cd "$dir" && "$GITNEXUS_BIN" "${analyze_args[@]}" >> "$LOG" 2>&1); then
       CHANGED=$((CHANGED + 1))
     else

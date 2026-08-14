@@ -190,7 +190,8 @@ gni agent-query "announce" --format json
 すべてのスクリプトは保守的なデフォルト値を採用:
 
 ```bash
-ALLOW_DIRTY_REINDEX=0      # 未コミット worktree をスキップ（グラフ汚染防止）
+ALLOW_DIRTY_REINDEX=0            # 未コミット worktree をスキップ（グラフ汚染防止）
+GITNEXUS_INJECT_CONTEXT_FILES=0  # AGENTS.md / CLAUDE.md / .claude/skills への注入をしない
 FORCE_REINDEX=0            # meta.json.lastCommit == HEAD の場合スキップ
 GITNEXUS_AUTO_REINDEX=1    # git フックはオプトアウト式（オプトイン式ではない）
 # embedding 検出は自動 — フラグ指定不要
@@ -228,6 +229,7 @@ ALLOW_DIRTY_REINDEX=1 FORCE_REINDEX=1 bin/gitnexus-auto-reindex.sh
 | `FORCE_REINDEX` | `1` | スモークテストで強制再インデックス |
 | `OUTPUT_DIR` | `./out` | グラフメタ JSONL 出力先 |
 | `GITNEXUS_AUTO_REINDEX` | `1` | `0` でフック無効化 |
+| `GITNEXUS_INJECT_CONTEXT_FILES` | `0` | `1` で `AGENTS.md` / `CLAUDE.md` / `.claude/skills/gitnexus/` への注入を許可。既定では `bin/` の自動実行パスに `--index-only` を付け、追跡下の人間が書いたファイルを書き換えない（厳密に `1` のみ有効） |
 
 ---
 

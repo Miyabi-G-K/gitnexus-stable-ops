@@ -47,3 +47,20 @@ skip_empty_repo() {
   [[ -d "$repo_path/.git" ]] || return 0
   ! (cd "$repo_path" && git rev-parse HEAD >/dev/null 2>&1)
 }
+
+# Get --index-only flag unless context-file injection is explicitly opted in.
+#
+# A bare `gitnexus analyze` writes AGENTS.md, CLAUDE.md and
+# .claude/skills/gitnexus/ into the target repo. In unattended paths (git
+# hooks, cron) that silently rewrites tracked, human-authored files on every
+# commit, which is why injection is opt-in here and off by default —
+# same stance as ALLOW_DIRTY_REINDEX and FORCE_REINDEX.
+#
+# Interactive `gitnexus analyze` is unaffected; this only governs the
+# automated wrappers in bin/.
+#
+# Usage: injection_flag
+# Output: "--index-only" unless GITNEXUS_INJECT_CONTEXT_FILES=1
+injection_flag() {
+  [[ "${GITNEXUS_INJECT_CONTEXT_FILES:-0}" == "1" ]] || echo "--index-only"
+}
